@@ -1,11 +1,18 @@
 
 +------------------------------------------------------------------+
-|  HTML::KTemplate v1.32 - Perl module to process HTML templates.  |
+|  HTML::KTemplate v1.33 - Perl module to process HTML templates.  |
 +------------------------------------------------------------------+
 
 
 CHANGES
 -------
+
+1.33  Sun Nov 09 15:34 2003
+    - Rewrite: some internal changes making this module faster.
+    - Changed: chomped newlines are replaced with a single space as you would
+      expect from a html template module.
+    - Fixed: assigned undefined block variables were not used if a global
+      variable with the same name existed.
 
 1.32  Wed Oct 15 23:29 2003
     - New: mailing list available for announcements and discussion (see POD

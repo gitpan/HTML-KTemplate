@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use Test;
-BEGIN { plan tests => 34 }
+BEGIN { plan tests => 36 }
 
 use HTML::KTemplate;
 my ($tpl, $output, $text, @text);
@@ -162,114 +162,45 @@ ok($$output =~ /^\s*
 $/x);
 
 
-# test a complex template
+# test changed tags
+
+$HTML::KTemplate::VAR_START_TAG = '${';
+$HTML::KTemplate::VAR_END_TAG   = '}';
+
+$HTML::KTemplate::BLOCK_START_TAG = '<<<';
+$HTML::KTemplate::BLOCK_END_TAG   = '>>>';
+
+$HTML::KTemplate::INCLUDE_START_TAG = '###';
+$HTML::KTemplate::INCLUDE_END_TAG   = '###';
 
 $tpl = HTML::KTemplate->new();
 
-$tpl->assign(
+$tpl->assign(VARIABLE => 'Variable');
 
-BOARD => {
-	TITLE => 'KTemplate Test Forum',
-	FONT => 'Verdana, Arial, Times New Roman',
-	WIDTH => '100%',
-},
-
-COLOR => {
-	BORDER => '#000000',
-	BG => '#FFFFFF',
-	TEXT => '#000000',
-	LINK => '#000000',
-	VLINK => '#000000',
-	ALINK => '#000000',
-},
-
-URL => {
-	CGI => 'http://www.domain.com/cgi-bin/',
-	IMAGES => 'http://www.domain.com/images/',
-},
-
-IMAGE => {
-	LOGO => 'logo.gif',
-	ON => 'on.gif',
-	OFF => 'off.gif',
-},
-
-LANG => {
-	REGISTER => 'Register',
-	PROFILE => 'Profile',
-	PREFERENCES => 'Preferences',	
-	SEARCH => 'Search',
-	PRIVATE_MSGS => 'Private Messages',
-	MEMBERS => 'Members',
-	HELP => 'Help',
-	LOGIN => 'Login',
-	LOGOUT => 'Logout',
-	LOGGED_IN => 'Logged in as',
-	LOGGED_OUT => 'Logged out',
-	FORUM => 'Forum',
-	TOPICS => 'Topcis',
-	POSTS => 'Posts',
-	LAST_POST => 'Last Post',
-	NEW_POSTS => 'New posts',
-	NO_NEW_POSTS => 'No new posts'
-},
-
-);
-
-$tpl->assign( 
-	SHOW_LOGO_IMAGE => 1,
-	LOGGED_IN => 1,
-	LOGGED_OUT => 0,
-);
-
-foreach ('Category Row 1', 'Category Row 2', 'Category Row 3', 'Category Row 4') {
-	$tpl->block('CATROW');
-	$tpl->assign( NAME => $_ );
-	
-	foreach ('Forum Row 1', 'Forum Row 2', 'Forum Row 3', 'Forum Row 4') {
-		$tpl->block('CATROW.FORUMROW');
-		$tpl->assign( NAME => $_ );
-		$tpl->assign(		
-			IMAGE_ON => 0,
-			IMAGE_OFF => 1,
-			ID => '10',
-			DESCRIPTION => 'Here comes some description text ... lalala lalala lalala ... ',
-			TOPICS => 1423,
-			POSTS => 3324,
-			LAST_POST => 'Some time ago',
-		);
-	}
-	
+foreach (1 .. 4) {
+	$tpl->block('LOOP');
+	$tpl->assign(VARIABLE => $_);
 }
 
-$tpl->block('');
-
-$tpl->assign(
-	COLSPAN => 5,
-	USERNAME => 'Kasper',
-);
-
-$tpl->process( 'templates/complex.tpl' );
+$tpl->process('templates/tags.tpl');
 $output = $tpl->fetch();
 
-ok($$output =~ /^.+?
-	KTemplate\sTest\sForum.+?
-	bgcolor=.FFFFFF.+?
-	Register.+?
-	(?:|.+?){5}
-	Help.+?
-	Logged.+?Kasper.+?
-	(?:
-		Category\sRow.+?
-		(?:
-			off\.gif.+?
-			Forum\sRow.+?
-			description.+?
-		){4}
-	){4}.+?
-	on\.gif.+?
-	off\.gif.+?
-$/sx && $$output =~ /(?:domain.+?){28}/s && $$output !~ /\[%/);
+$HTML::KTemplate::VAR_START_TAG = '[%';
+$HTML::KTemplate::VAR_END_TAG   = '%]';
+
+$HTML::KTemplate::BLOCK_START_TAG = '<!--';
+$HTML::KTemplate::BLOCK_END_TAG   = '-->';
+
+$HTML::KTemplate::INCLUDE_START_TAG = '<!--';
+$HTML::KTemplate::INCLUDE_END_TAG   = '-->';
+
+ok($$output =~ /^\s*
+	Variable\s*
+	1\s*2\s*3\s*4\s*
+	Text\s*
+	\[%\sVARIABLE\s%\]\s*
+	Text\s*
+$/x);
 
 
 # test root variable
@@ -415,13 +346,13 @@ eval { $tpl->process('templates/include.tpl') };
 ok($@ =~ /include blocks are disabled/i);
 
 
-# test changed tags
+# test changed tags again
 
 $HTML::KTemplate::VAR_START_TAG = '${';
 $HTML::KTemplate::VAR_END_TAG   = '}';
 
-$HTML::KTemplate::BLOCK_START_TAG = '<<<';
-$HTML::KTemplate::BLOCK_END_TAG   = '>>>';
+$HTML::KTemplate::BLOCK_START_TAG = '###';
+$HTML::KTemplate::BLOCK_END_TAG   = '###';
 
 $HTML::KTemplate::INCLUDE_START_TAG = '###';
 $HTML::KTemplate::INCLUDE_END_TAG   = '###';
@@ -434,6 +365,18 @@ foreach (1 .. 4) {
 	$tpl->block('LOOP');
 	$tpl->assign(VARIABLE => $_);
 }
+
+$tpl->process('templates/tags.tpl');
+$tpl->clear_out();
+
+$HTML::KTemplate::VAR_START_TAG = '${';
+$HTML::KTemplate::VAR_END_TAG   = '}';
+
+$HTML::KTemplate::BLOCK_START_TAG = '<<<';
+$HTML::KTemplate::BLOCK_END_TAG   = '>>>';
+
+$HTML::KTemplate::INCLUDE_START_TAG = '<<<';
+$HTML::KTemplate::INCLUDE_END_TAG   = '>>>';
 
 $tpl->process('templates/tags.tpl');
 $output = $tpl->fetch();
@@ -450,10 +393,8 @@ $HTML::KTemplate::INCLUDE_END_TAG   = '-->';
 ok($$output =~ /^\s*
 	Variable\s*
 	1\s*2\s*3\s*4\s*
-	Text\s*
-	\[%\sVARIABLE\s%\]\s*
-	Text\s*
-$/x);
+	# skip testing include
+/x);
 
 
 # test fetch method really works
@@ -633,23 +574,12 @@ $tpl->assign(
 	ON => 1
 );
 
+$HTML::KTemplate::CHOMP = 1; # just to be sure
 $tpl->process('templates/chomp.tpl');
-$HTML::KTemplate::CHOMP = 0;
-$tpl->process('templates/chomp.tpl');
-$HTML::KTemplate::CHOMP = 1;
 
 $output = $tpl->fetch();
 
-ok($$output =~ /^
-	TextText\n\n
-	Text\sTEXT\sText\n\n
-	TextText\s\s\s\s\s\s\n
-	Text\n\s\s\s\s\s\s\n
-	Text\n\n
-	Text\sTEXT\sText\n\n
-	Text\n\s\s\s\s\s\s\n
-	Text\n\s\s\s\s\s\s\n
-$/x);
+ok($$output =~ /^ {4}Text Text\r?\n\r?\nText\r?\n\r?\n\r?\n Text \r?\n\r?\n\r?\nText\r?\n\r?\nText Text Text\r?\n\r?\nTextTEXTText\r?\n\r?\nText TEXT Text\r?\n\r?\nText TEXT Text\r?\n\r?\nText Text {1,}$/);
 
 
 # test template syntax
@@ -820,3 +750,60 @@ $tpl->process(\$text);
 ok($text eq 'Test [% VARIABLE %] Test');
 
 $text = undef;
+
+
+# test changed tags inside of vars
+
+$HTML::KTemplate::VAR_START_TAG = '${';
+$HTML::KTemplate::VAR_END_TAG   = '}';
+
+$HTML::KTemplate::BLOCK_START_TAG = '<<<';
+$HTML::KTemplate::BLOCK_END_TAG   = '>>>';
+
+$HTML::KTemplate::INCLUDE_START_TAG = '###';
+$HTML::KTemplate::INCLUDE_END_TAG   = '###';
+
+$tpl = HTML::KTemplate->new(parse_vars => 1);
+
+$tpl->assign(
+	VARIABLE => '${VARIABLE_VALUE}',
+	VARIABLE_VALUE => 'Variable',
+);
+
+$tpl->process('templates/tags.tpl');
+$output = $tpl->fetch();
+
+$HTML::KTemplate::VAR_START_TAG = '[%';
+$HTML::KTemplate::VAR_END_TAG   = '%]';
+
+$HTML::KTemplate::BLOCK_START_TAG = '<!--';
+$HTML::KTemplate::BLOCK_END_TAG   = '-->';
+
+$HTML::KTemplate::INCLUDE_START_TAG = '<!--';
+$HTML::KTemplate::INCLUDE_END_TAG   = '-->';
+
+ok($$output =~ /^\s*
+	Variable\s*
+	Text\s*
+	\[%\sVARIABLE\s%\]\s*
+	Text\s*
+$/x);
+
+
+# test assigned undefined variables are not skipped
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(
+	SUB => { 
+		VARIABLE => 'variable not used',
+		TEST => { BLOCK => [ { SUB => { VARIABLE => undef } } ] },
+	},
+);
+
+$tpl->process('templates/block.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*$/x);
+
+

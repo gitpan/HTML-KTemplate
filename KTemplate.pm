@@ -29,7 +29,7 @@ use vars qw(
 	$FIRST $INNER $LAST
 );
 
-$VERSION = '1.32';
+$VERSION = '1.33';
 
 $VAR_START_TAG = '[%';
 $VAR_END_TAG   = '%]';
@@ -214,25 +214,26 @@ sub _include {
 	
 	# check whether includes are disabled
 	if ($self->{'config'}->{'no_includes'} && scalar @{ $self->{'files'} } != 0) {
-		croak("Include blocks are disabled at " . $self->{'files'}->[0]->[NAME])
+		croak('Include blocks are disabled at ' . $self->{'files'}->[0]->[NAME])
 			if $self->{'config'}->{'strict'};
 		return; # no strict
 	}
 	
 	# check for recursive includes
-	croak("Recursive includes: maximum recursion depth of " . $self->{'config'}->{'max_includes'} . " files exceeded")
+	croak('Recursive includes: maximum recursion depth of ' . $self->{'config'}->{'max_includes'} . ' files exceeded')
 		if scalar @{ $self->{'files'} } > $self->{'config'}->{'max_includes'}; 
 
 	($stack, $filepath) = $self->_load($filename);
 	
-	# add file path to use as include path and check for recursive includes
-	unshift @{ $self->{'files'} }, [ $filename, $filepath ] if defined $filepath;
+	# add file path to use as include path
+	unshift @{ $self->{'files'} }, [ $filename, $filepath ]
+		if defined $filepath;
 	
 	# create output
 	$self->_output($stack);
 	
 	# delete file info if it was added
-	shift @{ $self->{'files'} } if defined $filepath;
+	shift @{ $self->{'files'} }	if defined $filepath;
 
 }
 
@@ -252,27 +253,27 @@ sub _load {
 	# array or file handle, load and use it as template
 
 	if (ref $filename eq 'SCALAR') {
-	# skip undef and do not change passed scalar
-	$filedata = defined $$filename ? $$filename : '';
-	return $self->_parse(\$filedata, '[scalar_ref]');
+		# skip undef and do not change passed scalar
+		$filedata = defined $$filename ? $$filename : '';
+		return $self->_parse(\$filedata, '[scalar_ref]');
 	}
 
 	if (ref $filename eq 'ARRAY') {
-	$filedata = join("", @$filename);
-	return $self->_parse(\$filedata, '[array_ref]');
+		$filedata = join("", @$filename);
+		return $self->_parse(\$filedata, '[array_ref]');
 	}
 
 	if (ref $filename eq 'GLOB') {
-	$filedata = readline($$filename);
-	$filedata = '' unless defined $filedata; # skip undef
-	return $self->_parse(\$filedata, '[file_handle]');
+		$filedata = readline($$filename);
+		$filedata = '' unless defined $filedata; # skip undef
+		return $self->_parse(\$filedata, '[file_handle]');
 	}
 
 	# file handle (no reference)
 	if (ref \$filename eq 'GLOB') {
-	$filedata = readline($filename);
-	$filedata = '' unless defined $filedata; # skip undef
-	return $self->_parse(\$filedata, '[file_handle]');
+		$filedata = readline($filename);
+		$filedata = '' unless defined $filedata; # skip undef
+		return $self->_parse(\$filedata, '[file_handle]');
 	}
 
 	($filepath, $mtime) = $self->_find($filename);
@@ -359,7 +360,7 @@ sub _parse {
 	my $filedata = shift;
 	my $filename = shift;
 	my ($text, $tag, $type, $ident);
-	my ($regexp, $line, $block);
+	my ($regexp, $line, $block, $space);
 	my (@idents, @pstacks);
 
 	$line = 1; # current line
@@ -456,13 +457,14 @@ sub _parse {
 		
 		if ($CHOMP) {
 			# delete newline after last block tag
-			$text =~ s/^[ \t]*\n// if $block;
+			$space ? $text =~ s/^[ \t]*\r?\n// : $text =~ s/^[ \t]*\r?\n/ / if $block;
 			
 			# check this tag is not a var or include
 			$block = $type && $type !~ /^[Ii]/ ? 1 : 0;
+			$space = 0; # no space was added (default)
 			
 			# remove newline preceding this block tag
-			$text =~ s/(?:\n|^)[ \t]*\Z//m if $block;  
+			$space = 1 if $block && $text =~ s/\r?\n[ \t]*\z/ /;
 		}
 		
 		# the first element of the @pstacks array contains a reference
@@ -583,7 +585,7 @@ sub _output {
 		$line->[TYPE] == UNLESS ? $looped = $self->_loop( $line->[IDENT], $line->[STACK], UNLESS ) :
 		$line->[TYPE] == ELSE   ? $looped = $self->_loop( $looped, $line->[STACK], ELSE ) : next;
 	}
-	
+
 }
 
 
@@ -606,10 +608,15 @@ sub _value {
 		$value = &{$value} if ref $value eq 'CODE';
 		return '' if !defined $value || ref $value;
 	}
-	
-	$value = $self->_parse_var($value)
-		if $self->{'config'}->{'parse_vars'};
-	
+
+	if ($self->{'config'}->{'parse_vars'}) {
+		$value =~ s/ # replace template vars
+			\Q$VAR_START_TAG\E
+			\s*([\w.-]+)\s*
+			\Q$VAR_END_TAG\E
+		/ $self->_value($1) /xge;
+	}
+
 	return $value;
 
 }
@@ -622,7 +629,8 @@ sub _loop {
 	my $stack = shift;
 	my $mode  = shift;
 	my ($data, $vars, $skip);
-	my ($loop_vars, $loop_count);
+	my $loop_vars  = 0;
+	my $loop_count = 0;
 
 	if ($mode == BLOCK) {
 	
@@ -633,11 +641,10 @@ sub _loop {
 		# context to loop once or skip the block
 		unless (ref $data eq 'ARRAY') {
 			$data ? $data = [1] : return 0;
-			$loop_vars = 0; # just an if block
+			# if statement: no loop vars 
 		} else {
 			return 0 unless @$data;
 			$loop_vars = $self->{'config'}->{'loop_vars'};
-			$loop_count = 0;
 		}
 	
 	} elsif ($mode == LOOP) {
@@ -647,27 +654,23 @@ sub _loop {
 		return 0 unless ref $data eq 'ARRAY';
 		return 0 unless @$data;
 		$loop_vars = $self->{'config'}->{'loop_vars'};
-		$loop_count = 0;
 
 	} elsif ($mode == IF) {
 	
 		$data = $self->_get($ident);
 		return 0 unless defined $data;
 		$data ? $data = [1] : return 0;
-		$loop_vars = 0;
 	
 	} elsif ($mode == UNLESS) {
 	
 		$data = $self->_get($ident);
 		return 0 if $data;
 		$data = [1];
-		$loop_vars = 0;
 	
 	} elsif ($mode == ELSE) {
 	
 		return 0 if $ident;
 		$data = [1];
-		$loop_vars = 0;
 	
 	}
 	
@@ -685,14 +688,20 @@ sub _loop {
 			$loop_count == 1 ? unshift @{ $self->{'loop'} }, $FIRST :
 			$loop_count == @$data ? unshift @{ $self->{'loop'} }, $LAST :
 				unshift @{ $self->{'loop'} }, $INNER;
-		}
-	
-		# create output
-		$self->_output($stack);
+			
+			# create output
+			$self->_output($stack);
 
-		# delete loop context variables
-		shift @{ $self->{'loop'} } if $loop_vars;
+			# delete loop context variables
+			shift @{ $self->{'loop'} };
+			
+		} else {
 		
+			# create output
+			$self->_output($stack);
+		
+		}
+
 		!$skip # delete current loop variables
 			? (shift @{ $self->{'vars'} })
 			: ($skip = 0);
@@ -707,55 +716,51 @@ sub _get {
 #   hash (considering the temporary loop variables)
 
 	my $self  = shift;
-	my (@ident, $hash, $root, $key);
+	my (@ident, $root, $last_key, $skip);
 	
 	@ident = split /\./, $_[0];
+	$last_key = pop @ident;
 	
 	# check for loop context variables
-	return $self->{'loop'}->[0]->{ $ident[$#ident] } if $self->{'config'}->{'loop_vars'}
-		&& exists $self->{'loop'}->[0]->{ $ident[$#ident] };
+	return $self->{'loop'}->[0]->{$last_key} if $self->{'config'}->{'loop_vars'}
+		&& @ident == 0 && exists $self->{'loop'}->[0]->{$last_key};
 	
 	# loop values are prepended to the front of the 
 	# var array so start with them first
 	
-	foreach $hash (@{ $self->{'vars'} }) {
-		$root = $hash;	# not to change the hash
-	
-		# for each element of the identification
-		# go down the hash structure
+	foreach my $hash (@{ $self->{'vars'} }) {
+
+		# speed up normal variable lookup
+		return $hash->{$last_key} if @ident == 0 
+			&& exists $hash->{$last_key};
+
+		$root = $hash;	# do not change the hash
+
+		foreach my $key (@ident) {
 		
-		foreach $key (@ident) {
-			$root = ref $root eq 'HASH'
-				? $root->{$key}
-				: undef;
-			last unless defined $root;
+			if (ref $root eq 'HASH') {
+			# go down the hash structure
+			$root = $root->{$key};
+			}
+			
+			else {
+			# nothing found
+			$skip = 1; last;
+			}
+			
 		}
 	
-		# return if found something
-		return $root if defined $root;
+		unless ($skip) { # return if found something
+		return $root->{$last_key} if exists $root->{$last_key};
+		}
+		
+		else { # try again
+		$skip = 0;
+		}
+
 	}
-	
+
 	return undef;
-
-}
-
-
-sub _parse_var {
-
-	my $self = shift;
-	my $var  = shift;
-
-	$var =~ s/ # replace vars with their value
-
-		\Q$VAR_START_TAG\E
-		\s*
-		([\w.-]+)
-		\s*
-		\Q$VAR_END_TAG\E
-
-	/ $self->_value($1) /xge;
-	
-	return $var;
 
 }
 
@@ -1320,7 +1325,7 @@ Removes the newline before and after a block tag.
 
 =head1 MAILING LIST
 
-If you want to get email when a new release of HTML::KTemplate is available, join the announcements mailing list:
+If you want to get email when a new version of HTML::KTemplate is released, join the announcements mailing list:
 
   http://lists.sourceforge.net/lists/listinfo/html-ktemplate-announce
 
@@ -1329,6 +1334,13 @@ A mailing list for discussing HTML::KTemplate is available at <html-ktemplate-us
   http://lists.sourceforge.net/lists/listinfo/html-ktemplate-users
 
 You can also email me questions, comments, suggestions or bug reports directly to <kasper@repsak.de>.
+
+
+=head1 WEBSITE
+
+More information about HTML::KTemplate can be found at:
+
+  http://html-ktemplate.sourceforge.net/
 
 
 =head1 COPYRIGHT

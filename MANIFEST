@@ -7,7 +7,6 @@ README
 test.pl
 templates/block.tpl
 templates/chomp.tpl
-templates/complex.tpl
 templates/context.tpl
 templates/else.tpl
 templates/if.tpl
