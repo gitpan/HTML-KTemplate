@@ -787,20 +787,18 @@ close (FH);
 ok($$output =~ /^\s*Text\s*Test\s*Text\s*$/x);
 
 
-# test print method accepts only file handle ref
+# test process method accepts file handle
 
 $tpl = HTML::KTemplate->new();
 
 $tpl->assign(VARIABLE => 'Test');
 
-local *FH;
+open (FH, '<templates/simple.tpl') ||  die "Can't open file simple.tpl: $!";
 
-eval { 
-	$tpl->process('templates/simple.tpl');
-	$tpl->print(*FH);
-};
+$tpl->process(*FH);
+$output = $tpl->fetch();
 
-ok($@ =~ /as a reference/i);
+close (FH);
 
-
+ok($$output =~ /^\s*Text\s*Test\s*Text\s*$/x);
 

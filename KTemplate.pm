@@ -29,7 +29,7 @@ use vars qw(
 	$FIRST $INNER $LAST
 );
 
-$VERSION = '1.30';
+$VERSION = '1.31';
 
 $VAR_START_TAG = '[%';
 $VAR_END_TAG   = '%]';
@@ -160,13 +160,13 @@ sub block {
 	foreach $key (@ident) {
 	
 		# hash reference: perfect!
-		if ( ref $root->{$key} eq 'HASH' ) {
-		$root =  $root->{$key};
+		if (ref $root->{$key} eq 'HASH') {
+		$root = $root->{$key};
 		}
 	
 		# array reference: block continues in hash 
 		# reference at the end of the array
-		elsif ( ref $root->{$key} eq 'ARRAY' 
+		elsif (ref $root->{$key} eq 'ARRAY' 
 		  && ref $root->{$key}->[ $#{ $root->{$key} } ] eq 'HASH' ) {
 		$root =  $root->{$key}->[ $#{ $root->{$key} } ];
 		}
@@ -261,10 +261,16 @@ sub _load {
 	}
 	
 	if (ref $filename eq 'GLOB') {
+	$filedata = readline($$filename);
+	return $self->_parse(\$filedata, '[file_handle]');
+	}
+
+	# file handle (no reference)
+	if (ref \$filename eq 'GLOB') {
 	$filedata = readline($filename);
 	return $self->_parse(\$filedata, '[file_handle]');
 	}
-	
+
 	($filepath, $mtime) = $self->_find($filename);
 	
 	croak("Can't open file $filename: file not found") 
@@ -754,33 +760,14 @@ sub print {
 
 	my $self = shift;
 	my $fh = shift;
-	
-	croak("File handle must be passed as a reference") 
-		if defined $fh && !ref $fh;
-	
-	ref $fh eq 'GLOB'
+
+	ref $fh eq 'GLOB' || ref \$fh eq 'GLOB'
 		? CORE::print $fh $self->{'output'}
 		: CORE::print $self->{'output'};
 
 	return 1;
 
 }
- 
-
-# old print() method that allowed to pass
-# the file handle not as a reference
-# old: print(*FH) -> new: print(\*FH)
-
-# sub print {
-# 	my $self = shift;
-#  	local *FH = shift || '';
-# 	
-# 	defined fileno FH
-# 		? CORE::print FH $self->{'output'}
-# 		: CORE::print $self->{'output'};
-# 
-# 	return 1;
-# }
 
 
 sub fetch {
