@@ -29,7 +29,7 @@ use vars qw(
 	$FIRST $INNER $LAST
 );
 
-$VERSION = '1.20';
+$VERSION = '1.21';
 
 $VAR_START_TAG = '[%';
 $VAR_END_TAG   = '%]';
@@ -82,6 +82,7 @@ sub new {
 			'max_includes' => 15,
 			'loop_vars'    => 0,
 			'blind_cache'  => 0,
+			'include_vars' => 0,
 		},
 	};
 
@@ -296,6 +297,15 @@ sub _find {
 		return $filepath if $self->{'config'}->{'blind_cache'}
 			&& defined $CACHE->{$filepath};
 		return ($filepath, (stat(_))[9]) if -e $filepath;
+		
+		# check path from variable
+		if ($self->{'config'}->{'include_vars'}) {
+			$filepath = File::Spec->canonpath( $self->_get($filename) );
+			return $filepath if $self->{'config'}->{'blind_cache'}
+				&& defined $CACHE->{$filepath};
+			return ($filepath, (stat(_))[9]) if -e $filepath;
+		}
+		
     }
 	
     return undef;
@@ -953,7 +963,11 @@ Includes are used to process and include the output of another template file dir
   
   <!-- INCLUDE 'file.tpl' -->
 
-If the template can't be found under the specified file path (considering the root path), the path to the enclosing file is tried. See L<OPTIONS|"No Includes"> section how to disable includes or change the limit for recursive includes.
+If the template can't be found under the specified file path (considering the root path), the path to the enclosing file is tried. See L<OPTIONS|"No Includes"> section how to disable includes or change the limit for recursive includes. 
+
+It is also possible to include template files defined by a variable when the option for including variables is enabled (it is disabled by default).
+
+  <!-- INCLUDE VARIABLE -->
 
 
 =head1 ADVANCED
@@ -963,18 +977,15 @@ Although it is possible to create loops and if statements with the block tag, so
   <!-- IF VARIABLE -->
   
   <!-- END VARIABLE -->
-  
-  
+
   <!-- UNLESS VARIABLE -->
  
   <!-- END VARIABLE -->
-  
-  
+
   <!-- LOOP ARRAY -->
   
   <!-- END ARRAY -->
-  
-  
+
   <!-- IF VARIABLE -->
   
   <!-- ELSE VARIABLE -->
@@ -986,8 +997,7 @@ The else tag can be used with all statements, even with loops. For an even clean
   <!-- BEGIN ARRAY -->
   
   <!-- END -->
-  
-  
+
   <!-- IF VARIABLE -->
   
   <!-- ELSE -->
@@ -999,8 +1009,7 @@ The following syntax is also allowed, but won't work with the begin block:
   <!-- LOOP ARRAY -->
   
   <!-- END LOOP -->
-  
-  
+
   <!-- IF VARIABLE -->
   
   <!-- ELSE IF -->
@@ -1043,7 +1052,7 @@ Assigns values for the variables used in the templates. Accepts a hash or a hash
 
 =head2 block()
 
-See the describtion of L<BLOCKS|"BLOCKS">.
+See the description of L<BLOCKS|"BLOCKS">.
 
 =head2 process()
 
@@ -1137,6 +1146,13 @@ Set this option to 1 to disable includes. The include tags will be skipped unles
 Allows to set the maximum depth that includes can reach. An error is raised when this depth is exceeded.
 
   $tpl = HTML::KTemplate->new( max_includes => 15 );  # default
+
+=head2 Include Vars
+
+Allows to include template files defined by a variable (see the description of L<INCLUDES|"INCLUDES"> for more information).
+
+  $tpl = HTML::KTemplate->new( include_vars => 0 );  # default
+  $tpl = HTML::KTemplate->new( include_vars => 1 );
 
 =head2 Cache
 

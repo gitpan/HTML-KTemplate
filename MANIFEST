@@ -12,6 +12,7 @@ templates/else.tpl
 templates/if.tpl
 templates/if2.tpl
 templates/include.tpl
+templates/include2.tpl
 templates/loops.tpl
 templates/loops2.tpl
 templates/recursive.tpl

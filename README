@@ -1,6 +1,6 @@
 
 +------------------------------------------------------------------+
-|  HTML::KTemplate v1.20 - Perl module to process HTML templates.  |
+|  HTML::KTemplate v1.21 - Perl module to process HTML templates.  |
 +------------------------------------------------------------------+
 
 
@@ -18,9 +18,12 @@ To install, unzip and untar the archive, then type in the directory created:
 CHANGES
 -------
 
+1.21  Wed May 21 17:28:00 2003
+    - Added: option to include template files defined by a variable.
+
 1.20  Sun May 11 02:42:00 2003
     - Added: if, else, unless and loop statements for a better control of the 
-	  template output and a cleaner template syntax.
+      template output and a cleaner template syntax.
     - Added: blind cache option for some speed improvement over normal caching.
     - Added: default loop context variables can be changed and are faster now.
     - Changed: chomp removes the newline before and after a block tag instead 

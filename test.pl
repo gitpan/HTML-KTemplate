@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use Test;
-BEGIN { plan tests => 25 }
+BEGIN { plan tests => 26 }
 
 use HTML::KTemplate;
 my ($tpl, $output);
@@ -233,7 +233,7 @@ foreach ('Category Row 1', 'Category Row 2', 'Category Row 3', 'Category Row 4')
 			IMAGE_ON => 0,
 			IMAGE_OFF => 1,
 			ID => '10',
-			DESCRIPTION => 'Here comes some describtion text ... lalala lalala lalala ... ',
+			DESCRIPTION => 'Here comes some description text ... lalala lalala lalala ... ',
 			TOPICS => 1423,
 			POSTS => 3324,
 			LAST_POST => 'Some time ago',
@@ -264,7 +264,7 @@ ok($$output =~ /^.+?
 		(?:
 			off\.gif.+?
 			Forum\sRow.+?
-			describtion.+?
+			description.+?
 		){4}
 	){4}.+?
 	on\.gif.+?
@@ -671,5 +671,24 @@ ok($$output =~ /^\s*
 $/x);
 
 
+# test including template from var
+
+$tpl = HTML::KTemplate->new( include_vars => 1 );
+
+$tpl->assign(
+	VARIABLE => 'templates/simple.tpl',
+	SOME => { VARIABLE => 'templates/simple.tpl' },
+);
+
+$tpl->process('templates/include2.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	(?:
+	Text\s*
+	templates\/simple\.tpl\s*
+	Text\s*
+	){2}
+$/x);
 
 
