@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use Test;
-BEGIN { plan tests => 26 }
+BEGIN { plan tests => 33 }
 
 use HTML::KTemplate;
 my ($tpl, $output);
@@ -349,8 +349,7 @@ $/x);
 
 $tpl = HTML::KTemplate->new();
 
-$tpl->block('BLOCK');
-$tpl->assign( VARIABLE => 'Testing...' );
+$tpl->block('SUB.TEST.BLOCK');
 $tpl->clear_vars();
 
 $tpl->assign( VARIABLE => 'Testing...' );
@@ -667,7 +666,7 @@ $tpl->process('templates/syntax.tpl');
 $output = $tpl->fetch();
 
 ok($$output =~ /^\s*
-	(?:On\s*){14}
+	(?:On\s*){18}
 $/x);
 
 
@@ -690,5 +689,118 @@ ok($$output =~ /^\s*
 	Text\s*
 	){2}
 $/x);
+
+
+# test block method accepts array
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->block('SUB' => 'TEST.BLOCK');
+$tpl->assign(VARIABLE => 'Testing...');
+
+$tpl->process('templates/block.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*Testing...\s*$/x);
+
+
+# test parse vars option
+
+$tpl = HTML::KTemplate->new(parse_vars => 1);
+
+$tpl->assign(
+	VARIABLE => 'Test [% TEST %] Test',
+	TEST => 'Test [% BLUB %] Test',
+	BLUB => 'Blub',
+);
+
+$tpl->process('templates/simple.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	Text\s*
+	Test\s*Test\s*
+	Blub\s*
+	Test\s*Test\s*
+	Text\s*
+$/x);
+
+
+# test creating block with assign method
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(VARIABLE => 'Global');
+$tpl->assign('SUB.TEST.BLOCK',
+	VARIABLE => 'Test',
+);
+
+$tpl->assign(VARIABLE => 'Error');
+
+$tpl->process('templates/block.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*Test\s*$/x);
+
+
+# test process method accepts scalar ref
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(VARIABLE => 'Test');
+
+my $tpl_scalar = 'Test [% VARIABLE %] Test';
+
+$tpl->process(\$tpl_scalar);
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*(Test\s*){3}$/x);
+
+
+# test process method accepts array ref
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(VARIABLE => 'Test');
+
+my @tpl_array = ('Test', '[% VARIABLE %]', 'Test');
+
+$tpl->process(\@tpl_array);
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*(Test\s*){3}$/x);
+
+
+# test process method accepts file handle ref
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(VARIABLE => 'Test');
+
+open (FH, '<templates/simple.tpl') ||  die "Can't open file simple.tpl: $!";
+
+$tpl->process(\*FH);
+$output = $tpl->fetch();
+
+close (FH);
+
+ok($$output =~ /^\s*Text\s*Test\s*Text\s*$/x);
+
+
+# test print method accepts only file handle ref
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(VARIABLE => 'Test');
+
+local *FH;
+
+eval { 
+	$tpl->process('templates/simple.tpl');
+	$tpl->print(*FH);
+};
+
+ok($@ =~ /as a reference/i);
+
 
 

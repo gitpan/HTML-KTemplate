@@ -1,6 +1,6 @@
 
-<!-- BEGIN BLOCK -->
+<!-- BEGIN SUB.TEST.BLOCK -->
 
 [% VARIABLE %]
 
-<!-- END BLOCK -->
+<!-- END SUB.TEST.BLOCK -->

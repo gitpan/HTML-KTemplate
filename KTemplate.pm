@@ -29,7 +29,7 @@ use vars qw(
 	$FIRST $INNER $LAST
 );
 
-$VERSION = '1.21';
+$VERSION = '1.30';
 
 $VAR_START_TAG = '[%';
 $VAR_END_TAG   = '%]';
@@ -83,6 +83,7 @@ sub new {
 			'loop_vars'    => 0,
 			'blind_cache'  => 0,
 			'include_vars' => 0,
+			'parse_vars'   => 0,
 		},
 	};
 
@@ -107,8 +108,14 @@ sub new {
 sub assign {
 
 	my $self = shift;
-	my $target;
+	my ($target, $block);
 
+	# odd number of arguments: block
+	if (@_ % 2 != 0 && @_ >= 3) {
+		$self->block(shift);
+		++$block; 
+	}
+	
 	# if a block reference is defined,
 	# assign the variables to the block
 	$target = defined $self->{'block'}
@@ -122,6 +129,9 @@ sub assign {
 		my %assign = @_;
 		@{ $target }{ keys %assign } = values %assign;
 	}
+	
+	# remove block reference
+	$self->block() if $block;
 
 	return 1;
 
@@ -142,7 +152,7 @@ sub block {
 		return 1;
 	}
 	
-	@ident = split /\./, $_[0];
+	push @ident, split /\./, shift while @_;
 	$last_key = pop @ident;
 	
 	$root = $self->{'vars'}->[0];
@@ -183,14 +193,16 @@ sub block {
 
 
 sub process {
+
 	my $self = shift;
 
 	foreach (@_) {
 		next unless defined;
 		$self->_include($_);
 	}
-	
+
 	return 1;
+	
 }
 
 
@@ -204,24 +216,23 @@ sub _include {
 	if ($self->{'config'}->{'no_includes'} && scalar @{ $self->{'files'} } != 0) {
 		croak("Include blocks are disabled at " . $self->{'files'}->[0]->[NAME])
 			if $self->{'config'}->{'strict'};
-		return;
+		return; # no strict
 	}
 	
 	# check for recursive includes
-	croak("Recursive includes: maximum recursion depth of $self->{config}->{max_includes} files exceeded")
+	croak("Recursive includes: maximum recursion depth of " . $self->{'config'}->{'max_includes'} . " files exceeded")
 		if scalar @{ $self->{'files'} } > $self->{'config'}->{'max_includes'}; 
 
 	($stack, $filepath) = $self->_load($filename);
 	
-	# add file path to use as include path 
-	# and check for recursive includes
-	unshift @{ $self->{'files'} }, [ $filename, $filepath ];
+	# add file path to use as include path and check for recursive includes
+	unshift @{ $self->{'files'} }, [ $filename, $filepath ] if defined $filepath;
 	
 	# create output
 	$self->_output($stack);
 	
-	# delete file info
-	shift @{ $self->{'files'} };
+	# delete file info if it was added
+	shift @{ $self->{'files'} } if defined $filepath;
 
 }
 
@@ -233,6 +244,26 @@ sub _load {
 	my $self = shift;
 	my $filename = shift;
 	my ($filepath, $mtime, $filedata);
+	
+	# slurp the file
+	local $/ = undef;
+	
+	# when the passed argument is a reference to a scalar,
+	# array or file handle, load and use it as template
+
+	if (ref $filename eq 'SCALAR') {
+	return $self->_parse($filename, '[scalar_ref]');
+	}
+		
+	if (ref $filename eq 'ARRAY') {
+	$filedata = join("", @$filename);
+	return $self->_parse(\$filedata, '[array_ref]');
+	}
+	
+	if (ref $filename eq 'GLOB') {
+	$filedata = readline($filename);
+	return $self->_parse(\$filedata, '[file_handle]');
+	}
 	
 	($filepath, $mtime) = $self->_find($filename);
 	
@@ -248,9 +279,6 @@ sub _load {
 		return ($filedata->[0], $filepath) 
 			if defined $filedata && $filedata->[1] == $mtime;
 	}
-
-	# slurp the file
-	local $/ = undef;
 	
 	open (TEMPLATE, '<' . $filepath) ||
 		croak("Can't open file $filename: $!");
@@ -357,16 +385,16 @@ sub _parse {
 						[Ee][Ll][Ss][Ee]
 						|
 						[Uu][Nn][Ll][Ee][Ss][Ss]
-					)\s+
-					([\w.-]*)
-					|
+					) 
+					(?: \s+ ([\w.-]+) )?
+				|
 					([Ii][Nn][Cc][Ll][Uu][Dd][Ee])\s+
 					(?: "([^"]*?)" | '([^']*?)' | (\S*?) )
 				)
 				\s*
 				\Q$BLOCK_END_TAG\E
 			)
-			/sox
+			/sx
 			
 		: qr/^
 			(.*?)
@@ -379,20 +407,20 @@ sub _parse {
 			|
 				\Q$BLOCK_START_TAG\E		
 				\s*
-					(
-						[Bb][Ee][Gg][Ii][Nn]
-						|
-						[Ee][Nn][Dd]
-						|
-						[Ii][Ff]
-						|
-						[Ll][Oo][Oo][Pp]
-						|
-						[Ee][Ll][Ss][Ee]
-						|
-						[Uu][Nn][Ll][Ee][Ss][Ss]
-					)\s+
-				([\w.-]*)
+				(
+					[Bb][Ee][Gg][Ii][Nn]
+					|
+					[Ee][Nn][Dd]
+					|
+					[Ii][Ff]
+					|
+					[Ll][Oo][Oo][Pp]
+					|
+					[Ee][Ll][Ss][Ee]
+					|
+					[Uu][Nn][Ll][Ee][Ss][Ss]
+				)
+				(?: \s+ ([\w.-]+) )?
 				\s*
 				\Q$BLOCK_END_TAG\E
 			|
@@ -403,9 +431,9 @@ sub _parse {
 				\s*
 				\Q$INCLUDE_END_TAG\E
 			)
-			/sox;
+			/sx;
 			
-	while ($$filedata =~ s/$regexp//sox) {
+	while ($$filedata =~ s/$regexp//sx) {
 
 		$text  = $1;  # preceding text
 		$tag   = $2;  # whole tag (needed for line count)
@@ -458,7 +486,7 @@ sub _parse {
 				if scalar @idents == 0;
 
 			croak("Parse error: invalid param in block tag at $filename line $line")
-				if length $ident && (uc $ident eq 'BEGIN' || uc $ident ne $idents[0]->[TYPE])
+				if defined $ident && (uc $ident eq 'BEGIN' || uc $ident ne $idents[0]->[TYPE])
 				&& $ident ne $idents[0]->[IDENT];
 			
 			shift @pstacks;
@@ -488,11 +516,10 @@ sub _parse {
 				if scalar @idents == 0;
 				
 			croak("Parse error: invalid param in else tag at $filename line $line")
-				if length $ident && (uc $ident eq 'BEGIN' || uc $ident ne $idents[0]->[TYPE])
-				&& $ident ne $idents[0]->[IDENT];
+				if defined $ident && $ident ne $idents[0]->[IDENT];
 		
-			shift   @pstacks; # close current block ...
-			unshift @pstacks, [];  # ... and create a new one.
+			shift   @pstacks;       # close current block
+			unshift @pstacks, [];   # and create a new one.
 			push    @{$pstacks[1]}, [ ELSE, undef, $pstacks[0] ];
 		
 		} elsif ($type =~ /^[Ii]/) {
@@ -536,7 +563,7 @@ sub _output {
 	my $stack = shift;
 	my ($line, $looped);
 	
-	foreach $line (@$stack) {
+	foreach $line (@$stack) { # create template output
 		$line->[TYPE] == VAR    ? $self->{'output'} .= $self->_value( $line->[IDENT] ) :
 		$line->[TYPE] == TEXT   ? $self->{'output'} .= $line->[IDENT] :
 		$line->[TYPE] == FILE   ? $self->_include( $line->[IDENT] )   :
@@ -559,9 +586,9 @@ sub _value {
 	unless (defined $value) {
 		croak("No value found for variable $ident at " . $self->{'files'}->[0]->[NAME])
 			if $self->{'config'}->{'strict'};
-		return '';
+		return ''; # no strict
 	}
-	
+
 	# if the value is a code reference the code
 	# is called and the output is returned
 	
@@ -569,6 +596,9 @@ sub _value {
 		$value = &{$value} if ref $value eq 'CODE';
 		return '' if !defined $value || ref $value;
 	}
+	
+	$value = $self->_parse_var($value)
+		if $self->{'config'}->{'parse_vars'};
 	
 	return $value;
 
@@ -700,16 +730,57 @@ sub _get {
 }
 
 
-sub print {
+sub _parse_var {
+
 	my $self = shift;
-	local *FH = shift || '';
+	my $var  = shift;
+
+	$var =~ s/ # replace vars with their value
+
+		\Q$VAR_START_TAG\E
+		\s*
+		([\w.-]+)
+		\s*
+		\Q$VAR_END_TAG\E
+
+	/ $self->_value($1) /xge;
 	
-	defined fileno FH  # hope that works
-		? CORE::print FH $self->{'output'}
-		: CORE::print $self->{'output'};
-	
-	return 1;
+	return $var;
+
 }
+
+
+sub print {
+
+	my $self = shift;
+	my $fh = shift;
+	
+	croak("File handle must be passed as a reference") 
+		if defined $fh && !ref $fh;
+	
+	ref $fh eq 'GLOB'
+		? CORE::print $fh $self->{'output'}
+		: CORE::print $self->{'output'};
+
+	return 1;
+
+}
+ 
+
+# old print() method that allowed to pass
+# the file handle not as a reference
+# old: print(*FH) -> new: print(\*FH)
+
+# sub print {
+# 	my $self = shift;
+#  	local *FH = shift || '';
+# 	
+# 	defined fileno FH
+# 		? CORE::print FH $self->{'output'}
+# 		: CORE::print $self->{'output'};
+# 
+# 	return 1;
+# }
 
 
 sub fetch {
@@ -769,15 +840,16 @@ B<CGI-Script:>
   $tpl->assign( TITLE  => 'Template Test Page'    );
   $tpl->assign( TEXT   => 'Some welcome text ...' );
   
-  foreach (@some_data) {
+  foreach (1 .. 3) {
   
-      $tpl->block('LOOP');
-      $tpl->assign( TEXT => 'Just a test ...' );
+      $tpl->assign( LOOP,
+          TEXT => 'Just a test ...',
+      );
   
   }
   
   $tpl->process('template.tpl');
-   
+  
   $tpl->print();
 
 B<Template:>
@@ -809,7 +881,7 @@ B<Output:>
 
 =head1 MOTIVATION
 
-Although there are many different template modules at CPAN, I couldn't find any that would meet my expectations. So I created this one, with following main features:
+Although there are many different template modules at CPAN, I couldn't find any that would meet my expectations. So I created this one with following features:
 
 =over 4
 
@@ -821,6 +893,9 @@ Support for multidimensional data structures.
 
 =item *
 Everything is very simple and very fast.
+
+=item *
+Still there are many advanced options available.
 
 =back
 
@@ -850,7 +925,7 @@ To access a multidimensional hash data structure, the variable names are separat
       
   );
 
-If the value of a variable is a reference to a subroutine, the subroutine is called and the returned string is included in the output. This is the only way to execute perl code in a template.
+If the value of a variable is a reference to a subroutine, the subroutine is called and the returned string is included in the output. This is the only way to execute Perl code in a template.
 
   $tpl->assign(
   
@@ -864,27 +939,25 @@ If the value of a variable is a reference to a subroutine, the subroutine is cal
 
 =head1 BLOCKS
 
-Blocks allow you to create loops and iterate over a part of a template or to write simple if-statements. A block begins with C<< <!-- BEGIN BLOCKNAME --> >> and ends with C<< <!-- END BLOCKNAME --> >>. The following example shows the easiest way to create a block:
+Blocks allow you to create loops and iterate over a part of a template or to write simple if-statements. A block begins with C<< <!-- BEGIN BLOCKNAME --> >> and ends with C<< <!-- END BLOCKNAME --> >>. This is an example of creating a block with the C<block()> method:
 
   $tpl->assign( HEADER  => 'Some numbers:' );
   
-  @block_values= ('One', 'Two', 'Three', 'Four');
+  @block_values = ('One', 'Two', 'Three', 'Four');
   
-  foreach ( @block_values ) {
+  foreach (@block_values) {
   
       $tpl->block('LOOP_NUMBERS');
-      $tpl->assign( NUMBER => $_ );
+      $tpl->assign( NUMBER    => $_ );
+      $tpl->assign( SOMETHING => '' );
   
   }
   
-  $tpl->block();   # leave the block
+  $tpl->block();  # leave block
+  
   $tpl->assign( FOOTER => '...in words.' );
 
-Each time C<block()> is called it creates a new loop in the selected block. All variable values passed to C<assign()> are assigned only to this loop until a new loop is created or C<block()> is called without any arguments (to access global variables again).
-
-Global variables (or outer block variables) are also available inside a block. However, if there is a block variable with the same name, the block variable is used.
-
-Here is an example of a template for the script above:
+Each time C<block()> is called it creates a new loop in the selected block. All variable values passed to C<assign()> are assigned only to this loop until a new loop is created or C<block()> is called without any arguments to assign global variables again. This is a template for the script above:
 
   [% HEADER %]
   
@@ -896,7 +969,9 @@ Here is an example of a template for the script above:
   
   [% FOOTER %]
 
-Because a block is a normal variable with an array reference, blocks can also be created (faster) without the C<block()> method:
+Global variables (or outer block variables) are also available inside a block. However, if there is a block variable with the same name, the block variable is preferred.
+
+Because a block is a normal variable with an array reference, blocks can also be created without the C<block()> method:
 
   $tpl->assign( 
       HEADER  => 'Some numbers:',
@@ -910,22 +985,47 @@ Because a block is a normal variable with an array reference, blocks can also be
       FOOTER => '...in words.',
   );
 
-Loops within loops work as you would expect. To create a nested loop with C<block()>, you have to pass all blocknames separated by a dot, for example C<BLOCK_1.BLOCK_2>. This way, a new loop called C<BLOCK_2> is created in the last loop of C<BLOCK_1>. The variable values are assigned with C<assign()>.
+Loops within loops work as you would expect. To create a nested loop with C<block()>, you have to pass all block names separate as a list or joined with a dot, for example as C<BLOCK_1.BLOCK_2>. This way, a new loop for C<BLOCK_2> is created in the last loop of C<BLOCK_1>. The variable values are assigned with C<assign()>.
 
   foreach (@block_one) {
   
       $tpl->block('BLOCK_1');
-      $tpl->assign($_);
+      $tpl->assign(VAR => $_);
   
       foreach (@block_two) {
   
-          $tpl->block('BLOCK_1.BLOCK_2');  # block name is just BLOCK_2
-          $tpl->assign($_);
+          $tpl->block('BLOCK_1', 'BLOCK_2');
+          $tpl->assign(VAR => $_);
   
       }
   }
+  
+  $tpl->block();  # leave block
 
-Blocks can also be used to create if-statements. Simply assign a variable with a true or false value. Based on that, the block is skipped or included in the output. 
+The template would look like this:
+
+  <!-- BEGIN BLOCK_1 -->
+  
+      <!-- BEGIN BLOCK_2 -->
+  
+      <!-- END BLOCK_2 -->
+  
+  <!-- END BLOCK_1 -->
+
+B<Important: You have to call C<block()> without any arguments to assign global variables again.>
+
+It is also possible to create a loop with the C<assign()> method by passing the block name as the first argument (or all block names joined with a dot to create nested loops). The variables can be assigned only once and not as a hash reference but there is no need to use the C<block()> method.
+
+  $tpl->assign( BLOCK,  # assign to this block
+      VARIABLE_1 => 'Block ...',
+      VARIABLE_2 => 'Block ...',
+  );
+  
+  $tpl->assign(  # assign global again
+      VARIABLE_3 => 'Global ...'.
+  );
+
+Blocks can even be used to create if-statements. Simply assign a variable with a true or false value. Based on that, the block is skipped or included in the output. 
 
   $tpl->assign( SHOW_INFO  => 1 );  # show block SHOW_INFO
   $tpl->assign( SHOW_LOGIN => 0 );  # skip block SHOW_LOGIN
@@ -965,7 +1065,7 @@ Includes are used to process and include the output of another template file dir
 
 If the template can't be found under the specified file path (considering the root path), the path to the enclosing file is tried. See L<OPTIONS|"No Includes"> section how to disable includes or change the limit for recursive includes. 
 
-It is also possible to include template files defined by a variable when the option for including variables is enabled (it is disabled by default).
+It is possible to include template files defined by a variable when the option for including variables is enabled (it is disabled by default).
 
   <!-- INCLUDE VARIABLE -->
 
@@ -977,15 +1077,18 @@ Although it is possible to create loops and if statements with the block tag, so
   <!-- IF VARIABLE -->
   
   <!-- END VARIABLE -->
-
+   
+   
   <!-- UNLESS VARIABLE -->
  
   <!-- END VARIABLE -->
-
+   
+   
   <!-- LOOP ARRAY -->
   
   <!-- END ARRAY -->
-
+   
+   
   <!-- IF VARIABLE -->
   
   <!-- ELSE VARIABLE -->
@@ -997,24 +1100,26 @@ The else tag can be used with all statements, even with loops. For an even clean
   <!-- BEGIN ARRAY -->
   
   <!-- END -->
-
+   
+   
   <!-- IF VARIABLE -->
   
   <!-- ELSE -->
   
   <!-- END -->
 
-The following syntax is also allowed, but won't work with the begin block:
-
-  <!-- LOOP ARRAY -->
-  
-  <!-- END LOOP -->
+The following syntax is also allowed but will not work with the block tag:
 
   <!-- IF VARIABLE -->
   
-  <!-- ELSE IF -->
+  <!-- ELSE -->
   
   <!-- END IF -->
+   
+   
+  <!-- LOOP ARRAY -->
+  
+  <!-- END LOOP -->
 
 
 =head1 METHODS
@@ -1025,22 +1130,24 @@ Creates a new template object.
 
   $tpl = HTML::KTemplate->new();
   
-  $tpl = HTML::KTemplate->new( '/path/to/templates' );
+  $tpl = HTML::KTemplate->new('/path/to/templates');
   
   $tpl = HTML::KTemplate->new( 
       root         => '/path/to/templates',
-      loop_vars    => 0,
       cache        => 0,
-      blind_cache  => 0,
-      max_includes => 15,  
-      no_includes  => 0,
       strict       => 0,
+      no_includes  => 0,
+      max_includes => 15,
+      loop_vars    => 0,
+      blind_cache  => 0,
+      include_vars => 0,
+      parse_vars   => 0,
   );
 
 
 =head2 assign()
 
-Assigns values for the variables used in the templates. Accepts a hash or a hash reference.
+Assigns values for the variables used in the template.
 
   %hash = (
       VARIABLE => 'Value',
@@ -1048,28 +1155,44 @@ Assigns values for the variables used in the templates. Accepts a hash or a hash
   
   $tpl->assign( %hash );
   $tpl->assign(\%hash );
-  $tpl->assign( VARIABLE => 'Value' );  
+  $tpl->assign( VARIABLE => 'Value' ); 
+    
+  $tpl->assign( BLOCK,
+      VARIABLE => 'Value',
+      VARIABLE => 'Value',
+  );
 
 =head2 block()
 
 See the description of L<BLOCKS|"BLOCKS">.
 
+  $tpl->block('BLOCK_1');
+  
+  $tpl->block('BLOCK_1','BLOCK_2');
+  $tpl->block('BLOCK_1.BLOCK_2');
+  
+  $tpl->block();  # leave block
+
 =head2 process()
 
-The C<process()> method is called to process the template files passed as arguments. It loads each template file, parses it and adds it to the template output. The use of the template output is determined by the C<print()> or the C<fetch()> method.
+The C<process()> method is called to process the template files passed as arguments. It loads each template file, parses it and adds it to the template output. It is also possible to pass a reference to a scalar, array or file handle to initialize the template from memory. The use of the template output is determined by the C<print()> or the C<fetch()> method. 
 
-  $tpl->process( 'header.tpl', 'footer.tpl' );
+  $tpl->process('header.tpl', 'footer.tpl');
   
   $tpl->process('header.tpl');
   $tpl->process('footer.tpl');
+  
+  $tpl->process(\$scalar);
+  $tpl->process(\@array);
+  $tpl->process(\*FH);
 
 =head2 print()
 
-Prints the output data to C<STDOUT>. If a filehandle is passed, it is used instead of the standard output.
+Prints the output data to C<STDOUT>. If a file handle reference is passed, it is used instead of the standard output.
 
   $tpl->print();
   
-  $tpl->print(*FILE);
+  $tpl->print(\*FILE);
 
 =head2 fetch()
 
@@ -1156,7 +1279,7 @@ Allows to include template files defined by a variable (see the description of L
 
 =head2 Cache
 
-Caching option for a persistent environment like mod_perl. Parsed templates will be cached in memory based on their filepath and modification date. Use C<clear_cache()> to empty cache.
+Caching option for a persistent environment like mod_perl. Parsed templates will be cached in memory based on their file path and modification date. Use C<clear_cache()> to empty cache.
 
   $tpl = HTML::KTemplate->new( cache => 0 );  # default
   $tpl = HTML::KTemplate->new( cache => 1 );
@@ -1181,9 +1304,17 @@ The default loop variables can be changed in the following way:
   $HTML::KTemplate::INNER = { 'INNER' => 1, 'inner' => 1 };
   $HTML::KTemplate::LAST  = { 'LAST'  => 1, 'last'  => 1 };
 
+=head2 Parse Vars
+
+Set this option to 1 to parse variables. That way all template variables inside of a variable will be replaced with their assigned values.
+
+  $tpl = HTML::KTemplate->new( parse_vars => 0 );  # default
+  $tpl = HTML::KTemplate->new( parse_vars => 1 );
+
+
 =head2 Strict
 
-Set this option to 1, to raise errors on not defined variables and include tags when disabled.
+Set this option to 1 to raise errors on not defined variables and include tags when disabled.
 
   $tpl = HTML::KTemplate->new( strict => 0 );  # default
   $tpl = HTML::KTemplate->new( strict => 1 );
