@@ -28,7 +28,7 @@ use vars qw(
 	$ROOT $CHOMP $VERSION $CACHE
 );
 
-$VERSION = '1.10';
+$VERSION = '1.11';
 
 $VAR_START_TAG = '[%';
 $VAR_END_TAG   = '%]';
@@ -74,7 +74,7 @@ sub new {
 		},
 	};
 	
-	$self->{'config'}->{'root'} = shift	if @_ == 1;
+	$self->{'config'}->{'root'} = shift if @_ == 1;
 	croak('Odd number of option parameters') if @_ % 2 != 0;
 	
 	# load in all option parameters
@@ -559,12 +559,12 @@ sub _get {
 
 sub print {
 	my $self = shift;
-	local *FH = shift || *STDOUT;
-
-	defined fileno FH  # hope that works with all handles 
-		? print FH $self->{'output'}
-		: print STDOUT $self->{'output'};
-		
+	local *FH = shift || '';
+	
+	defined fileno FH  # hope that works
+		? CORE::print FH $self->{'output'}
+		: CORE::print $self->{'output'};
+	
 	return 1;
 }
 

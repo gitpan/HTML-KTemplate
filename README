@@ -1,6 +1,6 @@
 
 +------------------------------------------------------------------+
-|  HTML::KTemplate v1.10 - Perl module to process HTML templates.  |
+|  HTML::KTemplate v1.11 - Perl module to process HTML templates.  |
 +------------------------------------------------------------------+
 
 
@@ -18,12 +18,15 @@ To install, unzip and untar the archive, then type in the directory created:
 CHANGES
 -------
 
+1.11  Fri Mar 07 16:58:00 2003
+    - Fixed: print() method did not work with mod_perl. (Rob Cheung)
+
 1.10  Sun Mar 02 15:13:00 2003
     - Added: include function to add the output of other template files directly
       in place of the include tag.
     - Added: caching option for a persistent environment like mod_perl.
     - Added: special loop variables for a better control of the loop output.
-    - Added: filehandle can be used with the print method instead of STDOUT.
+    - Added: filehandle can be used with the print() method instead of STDOUT.
     - Added: strict option to raise errors on not defined variables and include
       tags when disabled.
 
