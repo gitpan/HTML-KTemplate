@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 use strict;
 use Test;
-BEGIN { plan tests => 20 }
+BEGIN { plan tests => 25 }
 
 use HTML::KTemplate;
 my ($tpl, $output);
@@ -53,7 +53,7 @@ ok($$output =~ /^\s*
 $/x);
 
 
-# test loops
+# test begin block as loop statement
 
 $tpl = HTML::KTemplate->new();
 
@@ -105,7 +105,7 @@ ok($$output =~ /^\s*
 $/x);
 
 
-# test if blocks
+# test begin block as if statement
 
 $tpl = HTML::KTemplate->new();
 
@@ -486,7 +486,12 @@ $/x);
 $tpl = HTML::KTemplate->new('loop_vars' => 1);
 
 foreach (1 .. 5) {
-	$tpl->block('LOOP');
+	$tpl->block('LOOP_1');
+	
+	foreach (1 .. 2) {
+		$tpl->block('LOOP_1.LOOP_2');
+	}
+	
 }
 
 $tpl->process('templates/context.tpl');
@@ -494,26 +499,177 @@ $output = $tpl->fetch();
 
 ok($$output =~ /^\s*
 	First\s*
-	(?:Inner\s*){3}
+		First\s*
+		Last\s*
+	(?:Inner\s*
+		First\s*
+		Last\s* ){3}
 	Last\s*
+		First\s*
+		Last\s*
 $/x);
 
 
-# test loop context variables with one loop
+# test if block
 
-$tpl = HTML::KTemplate->new('loop_vars' => 1);
+$tpl = HTML::KTemplate->new();
 
-foreach (1 .. 1) {
-	$tpl->block('LOOP');
-}
+$tpl->assign(
+	ON_1 => 1,
+	ON_2 => 1,
+	ON_3 => 'y',
+	ON_4 => {},
+	ON_5 => [],
+	OFF_1 => 0,
+	OFF_2 => undef,
+	OFF_3 => '',
+);
 
-$tpl->process('templates/context.tpl');
+$tpl->process('templates/if2.tpl');
 $output = $tpl->fetch();
 
 ok($$output =~ /^\s*
-	First\s*
-	Last\s*
+	Text\s*
+	(?:On\s*){5}
+	Text\s*
 $/x);
+
+
+# test loop block
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign({
+
+	VARIABLE => 'Global',
+	OUTER_LOOP => [
+		{
+			OUTER_NO_1 => 1,
+			OUTER_NO_2 => 0,
+			VAR => { INNER_LOOP => [0, 'a'] }
+		},
+		{
+			VARIABLE => 'Outer', 
+			OUTER_YES => {},
+			OUTER_NO => undef,
+			VAR => { INNER_LOOP => [[], {}, undef] }
+		},
+		{
+			VARIABLE => 'Outer', 
+			OUTER_YES => 'blub',
+			VAR => {
+				INNER_LOOP => [ 
+					{ VARIABLE => 'Inner', INNER_NO_1 => 1, INNER_NO_2 => 0 },  
+					{},
+				]
+			}
+		},
+	],
+});
+
+$tpl->process('templates/loops2.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	Global\s*
+		Global\s*
+			(?:Global\s*){2}
+		Outer\s*
+			(?:Outer\s*){3}
+		Outer\s*
+			Inner\s*
+			Outer\s*
+	Global\s*
+$/x);
+
+
+# test unless block
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(
+	OFF_1 => 1,
+	OFF_2 => 1,
+	OFF_3 => 'y',
+	OFF_4 => {},
+	OFF_5 => [],
+	ON_1 => 0,
+	ON_2 => undef,
+	ON_3 => '',
+);
+
+$tpl->process('templates/unless.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	(?:On\s*){3}
+$/x);
+
+
+# test else block
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(
+	OFF_LOOP => [],
+	OFF_COND => 0,
+	ON_COND  => 1,
+);
+
+$tpl->process('templates/else.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	Text\s*
+	(?:On\s*){4}
+	Text\s*
+$/x);
+
+
+# test chomp
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(
+	ON => 1
+);
+
+$tpl->process('templates/chomp.tpl');
+$HTML::KTemplate::CHOMP = 0;
+$tpl->process('templates/chomp.tpl');
+$HTML::KTemplate::CHOMP = 1;
+
+$output = $tpl->fetch();
+
+ok($$output =~ /^
+	TextText\n\n
+	Text\sTEXT\sText\n\n
+	TextText\s\s\s\s\s\s\n
+	Text\n\s\s\s\s\s\s\n
+	Text\n\n
+	Text\sTEXT\sText\n\n
+	Text\n\s\s\s\s\s\s\n
+	Text\n\s\s\s\s\s\s\n
+$/x);
+
+
+# test template syntax
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(
+	ON => 1,
+	OFF => 0,
+	ARRAY => [1],
+);
+
+$tpl->process('templates/syntax.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	(?:On\s*){14}
+$/x);
+
 
 
 

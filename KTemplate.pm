@@ -26,9 +26,10 @@ use vars qw(
 	$BLOCK_START_TAG $BLOCK_END_TAG
 	$INCLUDE_START_TAG $INCLUDE_END_TAG
 	$ROOT $CHOMP $VERSION $CACHE
+	$FIRST $INNER $LAST
 );
 
-$VERSION = '1.11';
+$VERSION = '1.20';
 
 $VAR_START_TAG = '[%';
 $VAR_END_TAG   = '%]';
@@ -43,18 +44,26 @@ $ROOT  = undef;
 $CHOMP = 1;
 $CACHE = {};
 
+$FIRST = { 'FIRST' => 1, 'first' => 1 };
+$INNER = { 'INNER' => 1, 'inner' => 1 };
+$LAST  = { 'LAST'  => 1, 'last'  => 1 };
 
-sub TEXT  () { 0 }
-sub VAR   () { 1 }
-sub BLOCK () { 2 }
-sub FILE  () { 3 }
 
-sub TYPE  () { 0 }
-sub IDENT () { 1 }
-sub STACK () { 2 }
+sub TEXT   () { 0 }
+sub VAR    () { 1 }
+sub BLOCK  () { 2 }
+sub FILE   () { 3 }
+sub IF     () { 4 }
+sub ELSE   () { 5 }
+sub UNLESS () { 6 }
+sub LOOP   () { 7 }
 
-sub NAME  () { 0 }
-sub PATH  () { 1 }
+sub TYPE   () { 0 }
+sub IDENT  () { 1 }
+sub STACK  () { 2 }
+
+sub NAME   () { 0 }
+sub PATH   () { 1 }
 
 
 sub new {
@@ -62,30 +71,35 @@ sub new {
 	my $class = shift;
 	my $self = {
 		'vars'   => [{}],  # values for template vars
+		'loop'   => [],    # loop context variables
 		'block'  => undef, # current block reference
 		'files'  => [],    # file paths for include
 		'output' => '',    # template output
 		'config' => {      # configuration
-			'cache' => 0,
-			'strict' => 0,
-			'no_includes' => 0,
+			'cache'        => 0,
+			'strict'       => 0,
+			'no_includes'  => 0,
 			'max_includes' => 15,
-			'loop_vars' => 0,
+			'loop_vars'    => 0,
+			'blind_cache'  => 0,
 		},
 	};
-	
+
 	$self->{'config'}->{'root'} = shift if @_ == 1;
 	croak('Odd number of option parameters') if @_ % 2 != 0;
-	
+
 	# load in all option parameters
 	$self->{'config'}->{$_} = shift while $_ = lc shift;
-	
+
 	$self->{'config'}->{'root'} = $ROOT
 		unless exists $self->{'config'}->{'root'};
-	
+
+	$self->{'config'}->{'cache'} = 1
+		if $self->{'config'}->{'blind_cache'};
+
 	bless ($self, $class);
 	return $self;
-	
+
 }
 
 
@@ -93,13 +107,13 @@ sub assign {
 
 	my $self = shift;
 	my $target;
-	
+
 	# if a block reference is defined,
 	# assign the variables to the block
 	$target = defined $self->{'block'}
 		? $self->{'block'}->[ $#{ $self->{'block'} } ]
 		: $self->{'vars'}->[0];
-	
+
 	if (ref $_[0] eq 'HASH') {
 		# copy data for faster variable lookup
 		@{ $target }{ keys %{$_[0]} } = values %{$_[0]};
@@ -107,7 +121,7 @@ sub assign {
 		my %assign = @_;
 		@{ $target }{ keys %assign } = values %assign;
 	}
-	
+
 	return 1;
 
 } 
@@ -187,13 +201,13 @@ sub _include {
 	
 	# check whether includes are disabled
 	if ($self->{'config'}->{'no_includes'} && scalar @{ $self->{'files'} } != 0) {
-		croak("Include blocks are disabled in template file " . $self->{'files'}->[0]->[NAME]) 
+		croak("Include blocks are disabled at " . $self->{'files'}->[0]->[NAME])
 			if $self->{'config'}->{'strict'};
 		return;
 	}
 	
 	# check for recursive includes
-	croak("Recursive includes: maximum recursion depth of " . $self->{'config'}->{'max_includes'} . " files exceeded") 
+	croak("Recursive includes: maximum recursion depth of $self->{config}->{max_includes} files exceeded")
 		if scalar @{ $self->{'files'} } > $self->{'config'}->{'max_includes'}; 
 
 	($stack, $filepath) = $self->_load($filename);
@@ -224,12 +238,16 @@ sub _load {
 	croak("Can't open file $filename: file not found") 
 		unless defined $filepath;
 	
-	# load from cache
-	$filedata = $CACHE->{$filepath}
-		if $self->{'config'}->{'cache'};
-	return ($filedata->[0], $filepath) 
-		if defined $filedata && $filedata->[1] == $mtime;
-	
+	if ($self->{'config'}->{'cache'}) {
+		# load parsed template from cache
+		$filedata = $CACHE->{$filepath};
+		
+		return ($filedata->[0], $filepath)
+			if $self->{'config'}->{'blind_cache'} && defined $filedata;
+		return ($filedata->[0], $filepath) 
+			if defined $filedata && $filedata->[1] == $mtime;
+	}
+
 	# slurp the file
 	local $/ = undef;
 	
@@ -243,7 +261,7 @@ sub _load {
 	# commit to cache
 	$CACHE->{$filepath} = [ $filedata, $mtime ]
 		if $self->{'config'}->{'cache'};
-		
+
 	return ($filedata, $filepath);
 
 }
@@ -259,21 +277,27 @@ sub _find {
     my $filename = shift;
     my ($inclpath, $filepath);
 
+    $filepath = defined $self->{'config'}->{'root'}
+        ? File::Spec->catfile($self->{'config'}->{'root'}, $filename)
+        : File::Spec->canonpath($filename);
+
+	return $filepath if $self->{'config'}->{'blind_cache'}
+		&& defined $CACHE->{$filepath};
+	return ($filepath, (stat(_))[9]) if -e $filepath;
+
 	# check path from where the file was included
     if (defined $self->{'files'}->[0]->[PATH]) {
 		$inclpath = $self->{'files'}->[0]->[PATH];
         $inclpath = [ File::Spec->splitdir($inclpath) ];
         $inclpath->[$#$inclpath] = $filename;
         $filepath = File::Spec->catfile(@$inclpath);
-        return (File::Spec->canonpath($filepath), (stat(_))[9])
-			if -e $filepath;
+		$filepath = File::Spec->canonpath($filepath);
+		
+		return $filepath if $self->{'config'}->{'blind_cache'}
+			&& defined $CACHE->{$filepath};
+		return ($filepath, (stat(_))[9]) if -e $filepath;
     }
-
-    $filepath = defined $self->{'config'}->{'root'}
-        ? File::Spec->catfile($self->{'config'}->{'root'},$filename)
-        : File::Spec->canonpath($filename);
-
-    return ($filepath, (stat(_))[9]) if -e $filepath;
+	
     return undef;
 	
 }
@@ -286,20 +310,22 @@ sub _parse {
 	my $self = shift;
 	my $filedata = shift;
 	my $filename = shift;
-	my ($pre, $type, $ident);
+	my ($text, $tag, $type, $ident);
+	my ($regexp, $line, $block);
+	my (@idents, @pstacks);
+
+	$line = 1; # current line
+	@pstacks = ([]);
 	
-	my $blocks = 0; # open blocks
-	my @pstacks = ([]);
+	# block and include tags are the same by default.
+	# if that wasn't changed, use a faster regexp.
 	
-	# block and include tags are the same by default
-	# if that wasn't changed, use a faster regexp 
-	
-	my $regexp = $BLOCK_START_TAG eq $INCLUDE_START_TAG 
+	$regexp = $BLOCK_START_TAG eq $INCLUDE_START_TAG 
 		&& $BLOCK_END_TAG eq $INCLUDE_END_TAG
 		
 		? qr/^
 			(.*?)
-			(?:
+			(
 				\Q$VAR_START_TAG\E		
 				\s*
 				([\w.-]+)
@@ -309,8 +335,20 @@ sub _parse {
 				\Q$BLOCK_START_TAG\E		
 				\s*
 				(?:
-					([Bb][Ee][Gg][Ii][Nn]|[Ee][Nn][Dd])\s+
-					([\w.-]+)
+					(
+						[Bb][Ee][Gg][Ii][Nn]
+						|
+						[Ee][Nn][Dd]
+						|
+						[Ii][Ff]
+						|
+						[Ll][Oo][Oo][Pp]
+						|
+						[Ee][Ll][Ss][Ee]
+						|
+						[Uu][Nn][Ll][Ee][Ss][Ss]
+					)\s+
+					([\w.-]*)
 					|
 					([Ii][Nn][Cc][Ll][Uu][Dd][Ee])\s+
 					(?: "([^"]*?)" | '([^']*?)' | (\S*?) )
@@ -322,7 +360,7 @@ sub _parse {
 			
 		: qr/^
 			(.*?)
-			(?:
+			(
 				\Q$VAR_START_TAG\E		
 				\s*
 				([\w.-]+)
@@ -331,8 +369,20 @@ sub _parse {
 			|
 				\Q$BLOCK_START_TAG\E		
 				\s*
-				([Bb][Ee][Gg][Ii][Nn]|[Ee][Nn][Dd])\s+
-				([\w.-]+)
+					(
+						[Bb][Ee][Gg][Ii][Nn]
+						|
+						[Ee][Nn][Dd]
+						|
+						[Ii][Ff]
+						|
+						[Ll][Oo][Oo][Pp]
+						|
+						[Ee][Ll][Ss][Ee]
+						|
+						[Uu][Nn][Ll][Ee][Ss][Ss]
+					)\s+
+				([\w.-]*)
 				\s*
 				\Q$BLOCK_END_TAG\E
 			|
@@ -344,27 +394,42 @@ sub _parse {
 				\Q$INCLUDE_END_TAG\E
 			)
 			/sox;
-
+			
 	while ($$filedata =~ s/$regexp//sox) {
 
-		$pre   = $1;  # preceding text
-		$type  = $3 || $5;  # tag type (undef for var)
-		$ident = defined $2 ? $2 : defined $4 ? $4 : defined $6 ? $6 : 
-				 defined $7 ? $7 : defined $8 ? $8 : undef;
+		$text  = $1;  # preceding text
+		$tag   = $2;  # whole tag (needed for line count)
+		$type  = $4 || $6;  # tag type (undef for var)
+		$ident = defined $3 ? $3 : defined $5 ? $5 : defined $7 ? $7 : 
+				 defined $8 ? $8 : defined $9 ? $9 : undef;
 	
-		# delete whitespace characters preceding the block tag
-		$pre =~ s/\s*$//s if $type && $CHOMP && $type !~ /^[Ii]/;
+		# get line position
+		$line += ($text =~ tr/\n//);
+		
+		if ($CHOMP) {
+			# delete newline after last block tag
+			$text =~ s/^[ \t]*\n// if $block;
+			
+			# check this tag is not a var or include
+			$block = $type && $type !~ /^[Ii]/ ? 1 : 0;
+			
+			# remove newline preceding this block tag
+			$text =~ s/(?:\n|^)[ \t]*\Z//m if $block;  
+		}
 		
 		# the first element of the @pstacks array contains a reference
 		# to the current parse stack where the template data is added.
 		
-		push @{$pstacks[0]}, [ TEXT, $pre ] if defined $pre;
-	
+		push @{$pstacks[0]}, [ TEXT, $text ] if defined $text;
+
 		if (!defined $type) {
 		
 			push @{$pstacks[0]}, [ VAR, $ident ];
 			
 		} elsif ($type =~ /^[Bb]/) {
+		
+			croak("Parse error: invalid param in block tag at $filename line $line") 
+				unless length $ident;
 		
 			# create a new parse stack were all data 
 			# will be added until the block ends.
@@ -374,26 +439,82 @@ sub _parse {
 			# so the block data doesn't get lost after the block ends.
 			push @{$pstacks[1]}, [ BLOCK, $ident, $pstacks[0] ];
 			
-			++$blocks;
+			# add block type and ident for syntax checking
+			unshift @idents, [ 'BEGIN', $ident ];
 			
-		} elsif ($type =~ /^[Ee]/) {
+		} elsif ($type =~ /^[Ee][Nn]/) {
+			
+			croak("Parse error: block closed but never opened at $filename line $line")
+				if scalar @idents == 0;
+
+			croak("Parse error: invalid param in block tag at $filename line $line")
+				if length $ident && (uc $ident eq 'BEGIN' || uc $ident ne $idents[0]->[TYPE])
+				&& $ident ne $idents[0]->[IDENT];
 			
 			shift @pstacks;
-			--$blocks;
+			shift @idents;
 			
+		} elsif ($type =~ /^[Ii][Ff]/) {
+		
+			croak("Parse error: invalid param in if tag at $filename line $line") 
+				unless length $ident;
+		
+			unshift  @pstacks,       [];
+			push     @{$pstacks[1]}, [  IF , $ident, $pstacks[0] ];
+			unshift  @idents,        [ 'IF', $ident ];
+	
+		} elsif ($type =~ /^[Uu]/) {
+		
+			croak("Parse error: invalid param in unless tag at $filename line $line")
+				unless length $ident;
+		
+			unshift  @pstacks,       [];
+			push     @{$pstacks[1]}, [  UNLESS , $ident, $pstacks[0] ];
+			unshift  @idents,        [ 'UNLESS', $ident ];
+			
+		} elsif ($type =~ /^[Ee]/) {
+
+			croak("Parse error: found else tag with no matching block at $filename line $line")
+				if scalar @idents == 0;
+				
+			croak("Parse error: invalid param in else tag at $filename line $line")
+				if length $ident && (uc $ident eq 'BEGIN' || uc $ident ne $idents[0]->[TYPE])
+				&& $ident ne $idents[0]->[IDENT];
+		
+			shift   @pstacks; # close current block ...
+			unshift @pstacks, [];  # ... and create a new one.
+			push    @{$pstacks[1]}, [ ELSE, undef, $pstacks[0] ];
+		
 		} elsif ($type =~ /^[Ii]/) {
+		
+			croak("Parse error: file to include not defined at $filename line $line") 
+				unless length $ident;
 		
 			push @{$pstacks[0]}, [ FILE, $ident ];
 			
+		} elsif ($type =~ /^[Ll]/) {
+		
+			croak("Parse error: invalid param in loop tag at $filename line $line") 
+				unless length $ident;
+
+			unshift  @pstacks,       [];
+			push     @{$pstacks[1]}, [  LOOP , $ident, $pstacks[0] ];
+			unshift  @idents,        [ 'LOOP', $ident ];
+
 		}
+
+		# tag might contain newline
+		$line += ($tag =~ tr/\n//);
+
 	}
-	
-	# add remaining text not recognized by the regex
+
+	# chomp and add remaining text not recognized by the regexp
+	$$filedata =~ s/^[ \t]*\n// if $CHOMP && $block; 
 	push @{$pstacks[0]}, [ TEXT, $$filedata ];
-	
-	croak("Parse error: block not closed in template file $filename") if $blocks > 0; 
-	croak("Parse error: block closed but never opened in template file $filename") if $blocks < 0;
-	
+
+	croak("Parse error: block not closed at $filename")
+		if @idents > 0;
+
 	return $pstacks[0];
 
 }
@@ -403,15 +524,19 @@ sub _output {
 
 	my $self = shift;
 	my $stack = shift;
-	my $line;
+	my ($line, $looped);
 	
 	foreach $line (@$stack) {
-		$line->[TYPE] == TEXT  ? $self->{'output'} .= $line->[IDENT] :
-		$line->[TYPE] == VAR   ? $self->{'output'} .= $self->_value( $line->[IDENT] ) :
-		$line->[TYPE] == BLOCK ? $self->_loop( $line->[IDENT], $line->[STACK] ) :
-		$line->[TYPE] == FILE  ? $self->_include( $line->[IDENT] ) : next;	
+		$line->[TYPE] == VAR    ? $self->{'output'} .= $self->_value( $line->[IDENT] ) :
+		$line->[TYPE] == TEXT   ? $self->{'output'} .= $line->[IDENT] :
+		$line->[TYPE] == FILE   ? $self->_include( $line->[IDENT] )   :
+		$line->[TYPE] == BLOCK  ? $looped = $self->_loop( $line->[IDENT], $line->[STACK], BLOCK )  :
+		$line->[TYPE] == IF     ? $looped = $self->_loop( $line->[IDENT], $line->[STACK], IF )     :
+		$line->[TYPE] == LOOP   ? $looped = $self->_loop( $line->[IDENT], $line->[STACK], LOOP )   :
+		$line->[TYPE] == UNLESS ? $looped = $self->_loop( $line->[IDENT], $line->[STACK], UNLESS ) :
+		$line->[TYPE] == ELSE   ? $looped = $self->_loop( $looped, $line->[STACK], ELSE ) : next;
 	}
-
+	
 }
 
 
@@ -422,7 +547,7 @@ sub _value {
 	my $value = $self->_get($ident);
 	
 	unless (defined $value) {
-		croak("No value found for variable $ident in file " . $self->{'files'}->[0]->[NAME])
+		croak("No value found for variable $ident at " . $self->{'files'}->[0]->[NAME])
 			if $self->{'config'}->{'strict'};
 		return '';
 	}
@@ -441,85 +566,89 @@ sub _value {
 
 
 sub _loop {
-#  - gets the array with the loop variables
-#  - loops through the array, each time creating an output 
-#    with the current loop variables
 
-	my $self = shift;
-	my $data = $self->_get(shift);
+	my $self  = shift;
+	my $ident = shift;
 	my $stack = shift;
-	my ($vars, $skip);
+	my $mode  = shift;
+	my ($data, $vars, $skip);
+	my ($loop_vars, $loop_count);
+
+	if ($mode == BLOCK) {
 	
-	return unless defined $data;
+		$data = $self->_get($ident);
+		return 0 unless defined $data;
+		
+		# no array reference: check the Boolean 
+		# context to loop once or skip the block
+		unless (ref $data eq 'ARRAY') {
+			$data ? $data = [1] : return 0;
+			$loop_vars = 0; # just an if block
+		} else {
+			return 0 unless @$data;
+			$loop_vars = $self->{'config'}->{'loop_vars'};
+			$loop_count = 0;
+		}
 	
-	my $loop_vars = $self->{'config'}->{'loop_vars'};
-	my $loop_count = 0;
+	} elsif ($mode == LOOP) {
+
+		$data = $self->_get($ident);
+		return 0 unless defined $data;
+		return 0 unless ref $data eq 'ARRAY';
+		return 0 unless @$data;
+		$loop_vars = $self->{'config'}->{'loop_vars'};
+		$loop_count = 0;
+
+	} elsif ($mode == IF) {
 	
-	# no array reference: check the Boolean 
-	# context to loop once or skip the block
-	unless (ref $data eq 'ARRAY') {
-		$data ? $data = [1] : return 1;
-		$loop_vars = 0; # just an if block
+		$data = $self->_get($ident);
+		return 0 unless defined $data;
+		$data ? $data = [1] : return 0;
+		$loop_vars = 0;
+	
+	} elsif ($mode == UNLESS) {
+	
+		$data = $self->_get($ident);
+		return 0 if $data;
+		$data = [1];
+		$loop_vars = 0;
+	
+	} elsif ($mode == ELSE) {
+	
+		return 0 if $ident;
+		$data = [1];
+		$loop_vars = 0;
+	
 	}
 	
 	foreach $vars (@$data) {
 	
-		# add current loop vars
-		if (ref $vars eq 'HASH') {
-			unshift @{ $self->{'vars'} }, $vars;
-		} else { $skip = 1 }
-		
-		# add context vars
+		ref $vars eq 'HASH' # add current loop variables
+			? (unshift @{ $self->{'vars'} }, $vars)
+			: ($skip = 1);
+
 		if ($loop_vars) {
 			++$loop_count;
 			
-			if (@$data == 1) {
-			unshift @{ $self->{'vars'} },
-				{ 
-				'FIRST' => 1, 'LAST' => 1, 
-				'first' => 1, 'last' => 1,
-				};
-			}
-			
-			elsif ($loop_count == 1) {
-			unshift @{ $self->{'vars'} },
-				{
-				'FIRST' => 1,
-				'first' => 1,
-				};
-			}
-			
-			elsif ($loop_count == @$data) { 
-			unshift @{ $self->{'vars'} },
-				{
-				'LAST' => 1,
-				'last' => 1,
-				};
-			}
-
-			else {
-			unshift @{ $self->{'vars'} },
-				{
-				'INNER' => 1,
-				'inner' => 1,
-				};
-			}
-			
+			# add loop context variables
+			@$data == 1 ? unshift @{ $self->{'loop'} }, { %$FIRST, %$LAST } :
+			$loop_count == 1 ? unshift @{ $self->{'loop'} }, $FIRST :
+			$loop_count == @$data ? unshift @{ $self->{'loop'} }, $LAST :
+				unshift @{ $self->{'loop'} }, $INNER;
 		}
 	
 		# create output
 		$self->_output($stack);
 
-		# delete context vars
-		shift @{ $self->{'vars'} } if $loop_vars;
+		# delete loop context variables
+		shift @{ $self->{'loop'} } if $loop_vars;
 		
-		# delete current loop vars
-		unless ($skip) { 
-			shift @{ $self->{'vars'} };
-		} else { $skip = 0 }
-		
+		!$skip # delete current loop variables
+			? (shift @{ $self->{'vars'} })
+			: ($skip = 0);
 	}
 
+	return 1;
 }
 
 
@@ -531,6 +660,10 @@ sub _get {
 	my (@ident, $hash, $root, $key);
 	
 	@ident = split /\./, $_[0];
+	
+	# check for loop context variables
+	return $self->{'loop'}->[0]->{ $ident[$#ident] } if $self->{'config'}->{'loop_vars'}
+		&& exists $self->{'loop'}->[0]->{ $ident[$#ident] };
 	
 	# loop values are prepended to the front of the 
 	# var array so start with them first
@@ -571,7 +704,7 @@ sub print {
 
 sub fetch {
 	my $self = shift;
-	my $temp = $self->{'output'};  # not the best solution
+	my $temp = $self->{'output'};
 	return \$temp;
 }
 
@@ -591,6 +724,7 @@ sub clear_vars {
 	return 1;
 }
 
+
 sub clear_out {
 	my $self = shift;
 	$self->{'output'} = '';
@@ -604,14 +738,7 @@ sub clear_cache {
 }
 
 
-sub error {
-# this method is not used anymore
-# errors are raised with croak now
-}
-
-
 1;
-
 
 
 
@@ -677,7 +804,7 @@ Although there are many different template modules at CPAN, I couldn't find any 
 =over 4
 
 =item *
-No statements in the template files, only variables and blocks.
+Template syntax can consist only of variables and blocks.
 
 =item *
 Support for multidimensional data structures.
@@ -790,7 +917,7 @@ Loops within loops work as you would expect. To create a nested loop with C<bloc
 
 Blocks can also be used to create if-statements. Simply assign a variable with a true or false value. Based on that, the block is skipped or included in the output. 
 
-  $tpl->assign( SHOW_INFO => 1 );   # show block SHOW_INFO
+  $tpl->assign( SHOW_INFO  => 1 );  # show block SHOW_INFO
   $tpl->assign( SHOW_LOGIN => 0 );  # skip block SHOW_LOGIN
 
 For a better control of the loop output, three special loop variables can be made available inside a loop: C<FIRST>, C<INNER> and C<LAST>. This variables are disabled by default (see L<OPTIONS|"Loop Vars"> section how to enable them).
@@ -828,6 +955,59 @@ Includes are used to process and include the output of another template file dir
 
 If the template can't be found under the specified file path (considering the root path), the path to the enclosing file is tried. See L<OPTIONS|"No Includes"> section how to disable includes or change the limit for recursive includes.
 
+
+=head1 ADVANCED
+
+Although it is possible to create loops and if statements with the block tag, sometimes the template syntax might get too confusing or not allow to write the wanted conditions in an easy way. For this reason if, unless, else and loop tags are available.
+
+  <!-- IF VARIABLE -->
+  
+  <!-- END VARIABLE -->
+  
+  
+  <!-- UNLESS VARIABLE -->
+ 
+  <!-- END VARIABLE -->
+  
+  
+  <!-- LOOP ARRAY -->
+  
+  <!-- END ARRAY -->
+  
+  
+  <!-- IF VARIABLE -->
+  
+  <!-- ELSE VARIABLE -->
+  
+  <!-- END VARIABLE -->
+
+The else tag can be used with all statements, even with loops. For an even cleaner template syntax, the else and the end tag can be written without the variable name.
+
+  <!-- BEGIN ARRAY -->
+  
+  <!-- END -->
+  
+  
+  <!-- IF VARIABLE -->
+  
+  <!-- ELSE -->
+  
+  <!-- END -->
+
+The following syntax is also allowed, but won't work with the begin block:
+
+  <!-- LOOP ARRAY -->
+  
+  <!-- END LOOP -->
+  
+  
+  <!-- IF VARIABLE -->
+  
+  <!-- ELSE IF -->
+  
+  <!-- END IF -->
+
+
 =head1 METHODS
 
 =head2 new()
@@ -839,12 +1019,13 @@ Creates a new template object.
   $tpl = HTML::KTemplate->new( '/path/to/templates' );
   
   $tpl = HTML::KTemplate->new( 
-      root  => '/path/to/templates',
-      no_includes => 0,
-      max_includes => 15,
-      loop_vars => 0,
-      strict => 0,
-      cache => 0,
+      root         => '/path/to/templates',
+      loop_vars    => 0,
+      cache        => 0,
+      blind_cache  => 0,
+      max_includes => 15,  
+      no_includes  => 0,
+      strict       => 0,
   );
 
 
@@ -964,12 +1145,25 @@ Caching option for a persistent environment like mod_perl. Parsed templates will
   $tpl = HTML::KTemplate->new( cache => 0 );  # default
   $tpl = HTML::KTemplate->new( cache => 1 );
 
+=head2 Blind Cache
+
+Behaves as the normal caching option but does not check the modification date to see if the template has changed. This might result in some speed improvement over normal caching.
+
+  $tpl = HTML::KTemplate->new( blind_cache => 0 );  # default
+  $tpl = HTML::KTemplate->new( blind_cache => 1 );
+
 =head2 Loop Vars
 
 Set this option to 1 to enable the loop variables C<FIRST>, C<INNER> and C<LAST>.
 
   $tpl = HTML::KTemplate->new( loop_vars => 0 );  # default
   $tpl = HTML::KTemplate->new( loop_vars => 1 );
+
+The default loop variables can be changed in the following way:
+
+  $HTML::KTemplate::FIRST = { 'FIRST' => 1, 'first' => 1 };
+  $HTML::KTemplate::INNER = { 'INNER' => 1, 'inner' => 1 };
+  $HTML::KTemplate::LAST  = { 'LAST'  => 1, 'last'  => 1 };
 
 =head2 Strict
 
@@ -980,7 +1174,7 @@ Set this option to 1, to raise errors on not defined variables and include tags 
 
 =head2 Chomp
 
-Deletes all whitespace characters preceding a block tag.
+Removes the newline before and after a block tag.
 
   $HTML::KTemplate::CHOMP = 1;  # default
   $HTML::KTemplate::CHOMP = 0;

@@ -107,7 +107,7 @@ background-color:  #FFFFFF;
 
 <!-- BEGIN DESCRIPTION -->
 <div class=forum_desc>[% DESCRIPTION %]</div>
-<!-- END DESCRIBTION -->
+<!-- END DESCRIPTION -->
 
 </td>
 <td class=col_3 align=center><div class=forum_topics>[% TOPICS %]</div></td>
