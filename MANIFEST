@@ -5,6 +5,7 @@ MANIFEST
 README
 test.pl
 templates/block.tpl
+templates/complex.tpl
 templates/if.tpl
 templates/loops.tpl
 templates/simple.tpl

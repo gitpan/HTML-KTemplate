@@ -18,14 +18,15 @@
 
 package HTML::KTemplate;
 use strict;
+use Carp;
 
 use vars qw(
 	$VAR_START_TAG $VAR_END_TAG 
 	$BLOCK_START_TAG $BLOCK_END_TAG 
-	$ERROR $ROOT $CHOMP $VERSION
+	$ROOT $CHOMP $VERSION
 );
 
-$VERSION = '1.01';
+$VERSION = '1.02';
 
 $VAR_START_TAG = '[%';
 $VAR_END_TAG   = '%]';
@@ -33,30 +34,50 @@ $VAR_END_TAG   = '%]';
 $BLOCK_START_TAG = '<!--';
 $BLOCK_END_TAG   = '-->';
 
-$ERROR = undef;
 $ROOT  = undef;
 $CHOMP = 1;
 
+sub TEXT  () { 0 }
+sub VAR   () { 1 }
+sub BLOCK () { 2 }
+
+sub TYPE  () { 0 }
+sub IDENT () { 1 }
+sub STACK () { 2 }
 
 
 sub new {
 	my $class = shift;
 	my $self = {
-		var_values => [{}],  # values for template vars
-		block_ref  => undef, # current block reference
-		data_raw   => '',    # template file
-		data_code  => '',    # template code
-		data_out   => '',    # template output
-		config     => {},    # configuration
+		'values' => [{}],  # values for template vars
+		'block'  => undef, # current block reference
+		'pstack' => undef, # parse stack
+		'file'   => '',    # template file
+		'output' => '',    # template output
+		'config' => {},    # configuration
 	};
 	
-	$self->{'config'}->{'ROOT'} = shift if @_ == 1;
-	%{ $self->{'config'} } = @_ if @_ >= 2;
+	# only one parameter: path to templates
+	$self->{'config'}->{'root'} = shift if @_ == 1;
+	
+	# check everything is passed as option => value
+	croak("Odd number of option parameters") if @_ % 2 != 0;
+	
+	# load in all options passed to new()
+	for (my $i = 0; $i < $#_; $i += 2) {
+	${ $self->{'config'} }{ lc $_[$i] } = $_[$i+1] }
+	
+	# consider $HTML::KTemplate::ROOT
+	$self->{'config'}->{'root'} = $ROOT
+	unless exists $self->{'config'}->{'root'};
+
+	# consider $HTML::KTemplate::CHOMP
+	$self->{'config'}->{'chomp'} = $CHOMP
+	unless exists $self->{'config'}->{'chomp'};
 	
 	bless ($self, $class);
 	return $self;
 }
-
 
 
 sub assign {
@@ -64,10 +85,9 @@ sub assign {
 	
 	# if a block reference is defined,
 	# assign the variables to the block
-	
-	my $target = defined $self->{'block_ref'}
-		? ${ $self->{'block_ref'} }[ $#{ $self->{'block_ref'} } ]
-		: ${ $self->{'var_values'} }[0];
+	my $target = defined $self->{'block'}
+		? ${ $self->{'block'} }[ $#{ $self->{'block'} } ]
+		: ${ $self->{'values'} }[0];
 	
 	if (ref $_[0] eq 'HASH') {
 	@{ $target }{ keys %{$_[0]} } = values %{$_[0]};
@@ -77,26 +97,22 @@ sub assign {
 	@{ $target }{ keys %assign } = values %assign;
 	}
 	
-	return 1;
 } 
-
 
 
 sub block {
 	my $self = shift;
 	my (@ident, $root, $key, $last_key);
 	
+	# no argument: undefine block reference 
 	if (!defined $_[0] || !length $_[0]) {
-	$self->{'block_ref'} = undef;
-	return 1;
-	}
+	$self->{'block'} = undef; return 1 }
 	
 	@ident = split /\./, $_[0];
-	$root = ${ $self->{'var_values'} }[0];
+	$root = ${ $self->{'values'} }[0];
 
 	# last key is treated differently
 	$last_key = pop @ident;
-
 	
 	foreach $key (@ident) {
 	
@@ -107,17 +123,16 @@ sub block {
 	
 		# array reference: block continues in hash 
 		# reference at the end of the array
-		elsif ( ref    $root->{$key} eq 'ARRAY' 
+		elsif ( ref $root->{$key} eq 'ARRAY' 
 		  && ref ${ $root->{$key} }[ $#{ $root->{$key} } ] eq 'HASH' ) {
 		$root =  ${ $root->{$key} }[ $#{ $root->{$key} } ];
 		}
 		
-		else {	# create hash reference
+		else { # create hash reference
 		$root = $root->{$key} = {};
 		}
 		
 	}
-	
 	
 	# block already exists: add new loop
 	if (ref $root->{$last_key} eq 'ARRAY') {
@@ -128,62 +143,64 @@ sub block {
 	$root->{$last_key} = [{}];
 	}
 	
-	$self->{'block_ref'} = $root->{$last_key};
-	return 1;
+	$self->{'block'} = $root->{$last_key};
 }
-
 
 
 sub process {
 	my $self = shift;
+	my $filename;
 	
-	$self->{'config'}->{'ROOT'} = $ROOT
-	unless exists $self->{'config'}->{'ROOT'};
+	foreach $filename (@_) {
+		
+		# skip if not defined
+		next unless defined $filename;
+		
+		# load the template file
+		$self->_load( $filename );
+		# create the parse stack
+		$self->_parse( $filename );
+		# and add to the output
+		$self->_output( $self->{'pstack'} );
+		
+		# to clear memory (?) hm ... 
+		$self->{'pstack'} = undef;
 	
-	foreach (@_) {
-	$self->_load($_) || return undef;
-	$self->_parse()  || return undef;
 	}
 	
-	eval $self->{'data_code'};
-	$self->{'data_code'} = '';
-
-	return $self->error("Unexpected error while evaluating template.\n") if $@;
 	return 1;
 }
-
 
 
 sub _load {
 	my $self = shift;
-	my $file = shift;
+	my $filename = shift;
+	my $filepath;
+	
+	# slurp the file
 	local $/ = undef;
-    
-	return $self->error("Template filename not defined.\n") 
-		unless defined $file;
 	
-	$file = $self->{'config'}->{'ROOT'} . '/' . $file
-	if defined $self->{'config'}->{'ROOT'};
+	$filepath = defined $self->{'config'}->{'root'}
+		? $self->{'config'}->{'root'} . '/' . $filename
+		: $filename;
 	
-	return $self->error("Can't open file: $file ($!).\n") 
-	if !open TEMPLATE, '<' . $file;
+	croak("Can't open file $filename: $!") 
+	if !open TEMPLATE, '<' . $filepath;
 
-	$self->{'data_raw'} = <TEMPLATE>;
+	$self->{'file'} = <TEMPLATE>;
 	close TEMPLATE;
-	
-	return 1;
 }
-
 
 
 sub _parse {
 	my $self = shift;
+	my $filename = shift;
 	my ($pre, $block, $ident);
-	my $level = 0;
 	
-	$self->{'data_code'} .= qq[\$self->{'data_out'} .= ''\n];
+	my $bdepth = 0;    # block depth to check that all blocks are closed
+	my @pstack = ([]); # parse stack: array containing the parsed template
 
-	while ($self->{'data_raw'} =~ s/^
+	while ($self->{'file'} =~ s/^
 		(.*?)
 		(?:
 			\Q$VAR_START_TAG\E		
@@ -194,95 +211,106 @@ sub _parse {
 		|
 			\Q$BLOCK_START_TAG\E		
 			\s*
-			(?:(BEGIN|END)\s+)?
+			(?:([Bb][Ee][Gg][Ii][Nn]|[Ee][Nn][Dd])\s+)?
 			([\w.-]+)
 			\s*
 			\Q$BLOCK_END_TAG\E
 		)
 	//sox) {
 
+		$pre   = $1;		# preceding text
+		$block = $3;		# block type (undef for var)
+		$ident = $2 || $4;	# identification
 	
-	$pre   = $1;		# preceding text
-	$block = $3;		# block type (undef for var)
-	$ident = $2 || $4;	# identification
+		# delete whitespace characters preceding the block tag
+		$pre =~ s/\s*$//s if $block && $self->{'config'}->{'chomp'};
+		
+		# the first element of the parse stack contains a reference
+		# to the current array where the template data is added.
+		# there the data is pushed as an array reference with
+		# the data type (text, var, block) and the data itself.
+		
+		push @{$pstack[0]}, [ TEXT, $pre ] if defined $pre;
 	
-	$pre = '' unless defined $pre;
-	$pre =~ s/\s*$//s if $block && $CHOMP;
-	$pre =~ s[`][\\`]g;
-
-	$self->{'data_code'} .= qq[\n. q`$pre`];
+		if (!defined $block) {
+			
+			push @{$pstack[0]}, [ VAR, $ident ];
+		
+		} elsif ($block =~ /^[Bb]/) {
+		
+			# add a new array to the beginning of the parse stack so 
+			# all data will be added there until the block ends.
+			unshift @pstack, [];
+		
+			# create a reference to this new parse stack in the old stack
+			# so the block data doesn't get lost after the end of the block.
+			push @{$pstack[1]}, [ BLOCK, $ident, $pstack[0] ];
+			
+			++$bdepth;
+		
+		} elsif ($block =~ /^[Ee]/) {
+		
+			shift @pstack;
+			--$bdepth;
+			
+		}
 	
-	if (!defined $block) {	# variable
-	$self->{'data_code'} .= qq[\n. \$self->_value('$ident')];
 	}
+	
+	# add remaining text not recognized by the regex
+	push @{$pstack[0]}, [ TEXT, $self->{'file'} ];
 
-	elsif ($block eq 'BEGIN') {
-	$self->{'data_code'} .= qq[;\n\n]
-		. qq[foreach (\@{ \$self->_loop('$ident') }) {\n]
-		. qq[\$self->_add(\$_);\n]
-		. qq[\$self->{'data_out'} .= ''\n];
-	++$level;
+	$self->{'file'} = '';
+	$self->{'pstack'} = $pstack[0];
+	
+	croak("Parse error: block not closed in template file $filename") if $bdepth > 0; 
+	croak("Parse error: block closed but never opened in template file $filename") if $bdepth < 0;
+}
+
+
+sub _output {
+	my $self = shift;
+	my $pstack = shift;
+	my $line;
+	
+	foreach $line (@$pstack) {
+	
+		$line->[TYPE] == TEXT  ? $self->{'output'} .= $line->[IDENT] :
+		$line->[TYPE] == VAR   ? $self->{'output'} .= $self->_value( $line->[IDENT] ) :
+		$line->[TYPE] == BLOCK ? $self->_loop( $line->[IDENT], $line->[STACK] ) : next;
+	
 	}
+}
+
+
+sub _loop {	
+	my $self = shift;
+	my $data = $self->_get(shift);
+	my $pstack = shift;
+	my ($vars, $skip);
 	
-	elsif ($block eq 'END') {
-	$self->{'data_code'} .= qq[;\n\n]
-		. qq[\$self->_del()  }\n]
-		. qq[\$self->{'data_out'} .= ''\n];
-	--$level;
+	return 1 unless defined $data;
+	
+	# no array reference: check the Boolean 
+	# context to loop once or skip the block
+	unless (ref $data eq 'ARRAY') {
+	$data ? $data = [1] : return 1 }
+	
+	foreach $vars ( @$data ) {
+	
+		# add the current loop vars
+		ref $vars eq 'HASH'
+		? unshift @{ $self->{'values'} }, $vars
+		: ($skip = 1);
+	
+		$self->_output( $pstack );
+	
+		# delete the loop vars
+		$skip ? ($skip = 0)
+		: shift @{ $self->{'values'} };
+		
 	}
-	
-	}	# end while
-	
-	$self->{'data_code'} .= qq[\n. q`$self->{'data_raw'}`;\n];
-	$self->{'data_raw'} = '';
-
-	return $self->error("Parse error: block not closed.\n") if $level > 0; 
-	return $self->error("Parse error: block closed but never opened.\n") if $level < 0;
-	
-	return 1;
 }
-
-
-
-sub print {
-	my $self = shift;
-	print STDOUT $self->{'data_out'};
-	return 1;
-}
-
-
-
-sub fetch {
-	my $self = shift;
-	return \$self->{'data_out'};
-}
-
-
-
-sub clear {
-	my $self = shift;
-	$self->clear_vars();
-	$self->clear_out();
-	return 1;
-}
-
-
-
-sub clear_vars {
-	my $self = shift;
-	$self->{'var_values'} = [{}];
-	$self->block();
-	return 1;
-}
-
-
-
-sub clear_out {
-	my $self = shift;
-	$self->{'data_out'} = '';
-	return 1;
-}
-
 
 
 sub _value {
@@ -304,7 +332,6 @@ sub _value {
 }
 
 
-
 sub _get {
 	my $self  = shift;
 	my (@ident, $hash, $root, $key);
@@ -314,7 +341,7 @@ sub _get {
 	# loop values are prepended to the front of the 
 	# var array so start with them first
 	
-	foreach $hash (@{ $self->{'var_values'} }) {
+	foreach $hash (@{ $self->{'values'} }) {
 	$root = $hash;	# not to change the hash
 	
 		# for each element of the identification
@@ -333,52 +360,46 @@ sub _get {
 }
 
 
-
-# following method returns an array reference 
-# containing the data to loop through
-
-sub _loop {	
+sub print {
 	my $self = shift;
-	my $data = $self->_get($_[0]);
-	
-	# if $data is not an array reference
-	# create one dependent on the Boolean 
-	# context (to loop once or skip the block)
-	
-	return [] unless defined $data;
-	return $data if ref $data eq 'ARRAY';
-	return $data ? [{}] : [];
+	print STDOUT $self->{'output'};
 }
 
 
-
-sub _add {
+sub fetch {
 	my $self = shift;
-	ref $_[0] eq 'HASH'
-	? unshift @{ $self->{'var_values'} }, $_[0]
-	: unshift @{ $self->{'var_values'} }, {};
+	return \$self->{'output'};
 }
 
 
-
-sub _del {
+sub clear {
 	my $self = shift;
-	shift @{ $self->{'var_values'} };
+	$self->clear_vars();
+	$self->clear_out();
 }
 
+
+sub clear_vars {
+	my $self = shift;
+	$self->{'values'} = [{}];
+	$self->block();
+}
+
+
+sub clear_out {
+	my $self = shift;
+	$self->{'output'} = '';
+	$self->{'pstack'} = undef;
+}
 
 
 sub error {
-	my $self = shift;
-	return $ERROR unless defined $_[0];
-	$ERROR = $_[0];
-	return undef;
+# this method is not used anymore
+# errors are raised with croak now
 }
 
 
 1;
-
-
 
 
 =head1 NAME
@@ -388,63 +409,51 @@ HTML::KTemplate - Perl module to process HTML templates.
 
 =head1 SYNOPSIS
 
-B<Perl code:>
+B<CGI-Script:>
 
-  use KTemplate;
+  #!/usr/bin/perl -w
+  use HTML::KTemplate;
   
-  $tpl = KTemplate->new('path/to/templates');
+  $tpl = HTML::KTemplate->new('path/to/templates');
   
-  $tpl->assign( TITLE => 'Template Test Page' );
+  $tpl->assign( TITLE  => 'Template Test Page'    );
+  $tpl->assign( TEXT   => 'Some welcome text ...' );
   
-  %hash = (
-      TEXT => 'Some welcome text ...',
-      USER => {
-          NAME => 'Kasper Dziurdz',
-          EMAIL => 'kasper@repsak.de',
-      },
-  );
+  foreach (@some_data) {
   
-  $tpl->assign( \%hash );
-  
-  for (1 .. 3) {
       $tpl->block('LOOP');
       $tpl->assign( TEXT => 'Just a test ...' );
+  
   }
   
-  $tpl->process('header.tpl', 'body.tpl') || die $tpl->error();
+  $tpl->process('header.tpl', 'body.tpl');
    
   $tpl->print();
 
 B<Template:>
 
-  +--------- -- -- - - -  -  -   -
-  | [% TITLE %]
-  +--------- -- -- - - -  -  -   -
-
-  Hello [% USER.NAME %]! [% TEXT %]
+  <html>
+  <head><title>[% TITLE %]</title>
+  <body>
   
-  Your eMail: [% USER.EMAIL %]
+  Hello! [% TEXT %]<p>
   
-  <!-- BEGIN LOOP -->
+  <!-- BEGIN LOOP -->  
   
-  [% TEXT %]
+  [% TEXT %]<br>
   
   <!-- END LOOP -->
+  
+  </body>
+  </html>
+
 
 B<Output:>
 
-  +--------- -- -- - - -  -  -   -
-  | Template Test Page
-  +--------- -- -- - - -  -  -   -
-  
-  Hello Kasper Dziurdz! Some welcome text ...
-  
-  Your eMail: kasper@repsak.de
+  Hello! Some welcome text ...
   
   Just a test ...
-  
   Just a test ...
-  
   Just a test ...
 
 
@@ -461,7 +470,7 @@ No statements in the template files, only variables and blocks.
 Support for multidimensional data structures.
 
 =item *
-Everything is very simple and (i believe) pretty fast.
+Everything is very simple and very fast.
 
 =back
 
@@ -578,10 +587,14 @@ Blocks can also be used to create if-statements. Simply assign a variable with a
 
 Creates a new template object.
 
-  $tpl = KTemplate->new();
+  $tpl = HTML::KTemplate->new();
   
-  $tpl = KTemplate->new( '/path/to/templates' );
-  $tpl = KTemplate->new( ROOT => '/path/to/templates' );
+  $tpl = HTML::KTemplate->new( '/path/to/templates' );
+  
+  $tpl = HTML::KTemplate->new( 
+      root  => '/path/to/templates',
+      chomp => 0,
+  );
 
 =head2 assign()
 
@@ -601,15 +614,9 @@ See the describtion of L<BLOCKS|"BLOCKS">.
 
 =head2 process()
 
-The C<process()> method is called to process the template files passed as arguments. It loads each template file and parses it into perl code. After all files are parsed the perl code is evaluated and the template output is created. The use of the template output is determined by the C<print()> or the C<fetch()> method.
+The C<process()> method is called to process the template files passed as arguments. It loads each template file, parses it and adds it to the template output. The use of the template output is determined by the C<print()> or the C<fetch()> method.
 
-  $tpl->process(
-  
-      'header.tpl',
-      'body.tpl',
-      'footer.tpl',
-  
-  ) || die $tpl->error();
+  $tpl->process('header.tpl', 'body.tpl', 'footer.tpl');
 
 =head2 print()
 
@@ -623,7 +630,7 @@ Returns a scalar reference to the output data.
 
   $output_ref = $tpl->fetch();
   
-  print FILE $$output_ref;
+  print FILE $$output_ref_ref;
 
 =head2 clear()
 
@@ -648,39 +655,35 @@ Clears all output data created by C<process()>.
 
   $tpl->clear_out();
 
-=head2 error()
-
-On error, the C<process()> method returns false (C<undef>). Then the C<error()> method can be called to retrieve details of the error. 
-
-  $tpl->process() || die $tpl->error();
-
 
 =head1 OPTIONS
 
 =head2 Variable Tag
 
-  $KTemplate::VAR_START_TAG = '[%';
-  $KTemplate::VAR_END_TAG   = '%]';
+  $HTML::KTemplate::VAR_START_TAG = '[%';
+  $HTML::KTemplate::VAR_END_TAG   = '%]';
 
 =head2 Block Tag
- 
-  $KTemplate::BLOCK_START_TAG = '<!--';
-  $KTemplate::BLOCK_END_TAG   = '-->';
+
+  $HTML::KTemplate::BLOCK_START_TAG = '<!--';
+  $HTML::KTemplate::BLOCK_END_TAG   = '-->';
 
 =head2 Root
 
-  $KTemplate::ROOT = undef;  # default
-  $KTemplate::ROOT = '/path/to/templates';
+  $HTML::KTemplate::ROOT = undef;  # default
+  $HTML::KTemplate::ROOT = '/path/to/templates';
   
-  $tpl = KTemplate->new( '/path/to/templates' );
-  $tpl = KTemplate->new( ROOT => '/path/to/templates' );
+  $tpl = HTML::KTemplate->new( '/path/to/templates' );
+  $tpl = HTML::KTemplate->new( root => '/path/to/templates' );
 
 =head2 Chomp
 
 Deletes all whitespace characters preceding a block tag.
 
-  $KTemplate::CHOMP = 1;  # default
-  $KTemplate::CHOMP = 0;
+  $HTML::KTemplate::CHOMP = 1;  # default
+  $HTML::KTemplate::CHOMP = 0;
+  
+  $tpl = HTML::KTemplate->new( chomp => 0 );
 
 
 =head1 COPYRIGHT

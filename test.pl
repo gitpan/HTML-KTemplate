@@ -2,7 +2,7 @@
 use strict;
 use Test;
 
-BEGIN { plan tests => 10 }
+BEGIN { plan tests => 11 }
 
 use HTML::KTemplate;
 my ($tpl, $output);
@@ -29,7 +29,7 @@ $tpl->assign(
 $tpl->process('templates/variables.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){5}\s*$/ && !defined $tpl->error );
+ok( $$output =~ /^\s*(?:Everything okay ...\s*){5}\s*$/ );
 
 
 
@@ -52,7 +52,7 @@ $tpl->assign({
 $tpl->process('templates/loops.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*(?:Global variable ...\s*){4}(?:Loop variable \(outer\)...\s*){4}(?:Loop variable \(inner\)...\s*){1}(?:Loop variable \(outer\)...\s*){1}\s*$/ && !defined $tpl->error );
+ok( $$output =~ /^\s*(?:Global variable ...\s*){4}(?:Loop variable \(outer\)...\s*){4}(?:Loop variable \(inner\)...\s*){1}(?:Loop variable \(outer\)...\s*){1}\s*$/ );
 
 
 
@@ -65,7 +65,7 @@ $tpl->assign( ON => 1, OFF => 0, CHECK => 'a', VARIABLE => 'Everything okay ...'
 $tpl->process('templates/if.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){5}\s*$/ && !defined $tpl->error );
+ok( $$output =~ /^\s*(?:Everything okay ...\s*){5}\s*$/ );
 
 
 
@@ -89,7 +89,7 @@ $tpl->assign( SOME_TEXT => 'Global variable ...');
 $tpl->process('templates/loops.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*(?:Global variable ...\s*){1}(?:(?:Loop variable \(outer\)...\s*){1}(?:Loop variable \(inner\)...\s*){2}){3}\s*$/ && !defined $tpl->error );
+ok( $$output =~ /^\s*(?:Global variable ...\s*){1}(?:(?:Loop variable \(outer\)...\s*){1}(?:Loop variable \(inner\)...\s*){2}){3}\s*$/ );
 
 
 
@@ -105,7 +105,7 @@ $output = $tpl->fetch();
 
 $HTML::KTemplate::ROOT = undef;
 
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){1}\s*$/ && !defined $tpl->error );
+ok( $$output =~ /^\s*(?:Everything okay ...\s*){1}\s*$/ );
 
 
 
@@ -121,14 +121,14 @@ $output = $tpl->fetch();
 
 $HTML::KTemplate::ROOT = undef;
 
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){1}\s*$/ && !defined $tpl->error );
+ok( $$output =~ /^\s*(?:Everything okay ...\s*){1}\s*$/ );
 
 
 
-# test new( ROOT => 'path/to/templates' )
+# test new( root => 'path/to/templates' )
 
 $HTML::KTemplate::ROOT = 'wrong/path';
-$tpl = HTML::KTemplate->new('templates');
+$tpl = HTML::KTemplate->new(root => 'templates');
 
 $tpl->assign( VARIABLE => 'Everything okay ...' );
 
@@ -137,7 +137,7 @@ $output = $tpl->fetch();
 
 $HTML::KTemplate::ROOT = undef;
 
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){1}\s*$/ && !defined $tpl->error );
+ok( $$output =~ /^\s*(?:Everything okay ...\s*){1}\s*$/ );
 
 
 
@@ -151,7 +151,7 @@ $tpl->clear_vars();
 $tpl->process('templates/simple.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*$/ && !defined $tpl->error );
+ok( $$output =~ /^\s*$/ );
 
 
 
@@ -168,7 +168,7 @@ $tpl->assign( VARIABLE => 'Everything okay ...' );
 $tpl->process('templates/block.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*$/ && !defined $tpl->error );
+ok( $$output =~ /^\s*$/ );
 
 
 
@@ -183,6 +183,96 @@ $tpl->clear_out();
 
 $output = $tpl->fetch();
 
-ok( $$output =~ /^$/ && !defined $tpl->error );
+ok( $$output =~ /^$/ );
 
 
+
+# test a complex template
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(
+
+BOARD => {
+	TITLE => 'KTemplate Test Forum',
+	FONT => 'Verdana, Arial, Times New Roman',
+	WIDTH => '100%',
+},
+
+COLOR => {
+	BORDER => '#000000',
+	BG => '#FFFFFF',
+	TEXT => '#000000',
+	LINK => '#000000',
+	VLINK => '#000000',
+	ALINK => '#000000',
+},
+
+URL => {
+	CGI => 'http://www.domain.com/cgi-bin/',
+	IMAGES => 'http://www.domain.com/images/',
+},
+
+IMAGE => {
+	LOGO => 'logo.gif',
+	ON => 'on.gif',
+	OFF => 'off.gif',
+},
+
+LANG => {
+	REGISTER => 'Register',
+	PROFILE => 'Profile',
+	PREFERENCES => 'Preferences',	
+	SEARCH => 'Search',
+	PRIVATE_MSGS => 'Private Messages',
+	MEMBERS => 'Members',
+	HELP => 'Help',
+	LOGIN => 'Login',
+	LOGOUT => 'Logout',
+	LOGGED_IN => 'Logged in as',
+	LOGGED_OUT => 'Logged out',
+	FORUM => 'Forum',
+	TOPICS => 'Topcis',
+	POSTS => 'Posts',
+	LAST_POST => 'Last Post',
+	NEW_POSTS => 'New posts',
+	NO_NEW_POSTS => 'No new posts'
+},
+
+);
+
+$tpl->assign( 
+	SHOW_LOGO_IMAGE => 1,
+	LOGGED_IN => 1,
+	LOGGED_OUT => 0,
+);
+
+$tpl->assign(
+	COLSPAN => 5,
+	USERNAME => 'Kasper',
+);
+
+foreach ('Category Row 1', 'Category Row 2', 'Category Row 3', 'Category Row 4') {
+	$tpl->block('CATROW');
+	$tpl->assign( NAME => $_ );
+	
+	foreach ('Forum Row 1', 'Forum Row 2', 'Forum Row 3', 'Forum Row 4') {
+		$tpl->block('CATROW.FORUMROW');
+		$tpl->assign( NAME => $_ );
+		$tpl->assign(		
+			IMAGE_ON => 0,
+			IMAGE_OFF => 1,
+			ID => '10',
+			DESCRIPTION => 'Here comes some describtion text ... lalala lalala lalala ... ',
+			TOPICS => 1423,
+			POSTS => 3324,
+			LAST_POST => 'Some time ago',
+		);
+	}
+	
+}
+
+$tpl->process( 'templates/complex.tpl' );
+$output = $tpl->fetch();
+
+ok( $$output =~ /^.+?KTemplate Test Forum.+?Register.+?(?:|.+?){5}Help.+?Logged in as Kasper.+?(?:Category Row.+?(?:off\.gif.+?Forum Row.+?Here comes some describtion.+?){4}){4}/s );

@@ -1,6 +1,6 @@
 
 +------------------------------------------------------------------+
-|  HTML::KTemplate v1.01 - Perl module to process HTML templates.  |
+|  HTML::KTemplate v1.02 - Perl module to process HTML templates.  |
 +------------------------------------------------------------------+
 
 
@@ -18,11 +18,16 @@ To install, unzip and untar the archive, then type in the directory created:
 CHANGES
 -------
 
+1.02  Tue Sep 24 14:37:00 2002
+    - Rewrite of the parsing function so the module is even faster now.
+	- Instead of the error() method croak is used to die on errors.
+	- Chomp option can be set with the new() method.
+
 1.01  Sat Sep 07 15:17:00 2002
-	- template path can now be set with new()
+	- Template path can now be set with the new() method.
 
 1.00  Thu Sep 05 10:36:00 2002
-	- first public release
+	- First public release.
 
 
 COPYRIGHT
