@@ -1,0 +1,11 @@
+ARTISTIC
+KTemplate.pm
+Makefile.PL
+MANIFEST
+README
+test.pl
+templates/block.tpl
+templates/if.tpl
+templates/loops.tpl
+templates/simple.tpl
+templates/variables.tpl

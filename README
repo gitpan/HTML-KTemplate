@@ -1,0 +1,46 @@
+
++------------------------------------------------------------------+
+|  HTML::KTemplate v1.01 - Perl module to process HTML templates.  |
++------------------------------------------------------------------+
+
+
+INSTALLATION
+------------
+
+To install, unzip and untar the archive, then type in the directory created:
+
+	perl Makefile.PL
+	make
+	make test
+	make install
+
+
+CHANGES
+-------
+
+1.01  Sat Sep 07 15:17:00 2002
+	- template path can now be set with new()
+
+1.00  Thu Sep 05 10:36:00 2002
+	- first public release
+
+
+COPYRIGHT
+---------
+
+Copyright (c) 2002 Kasper Dziurdz. All rights reserved.
+
+This module is free software; you can redistribute it and/or
+modify it under the same terms as Perl itself.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+Artistic License for more details.
+
+
+AUTHOR
+------
+
+Kasper Dziurdz <kasper@repsak.de>
+
