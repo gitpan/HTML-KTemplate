@@ -26,7 +26,7 @@ use vars qw(
 	$ROOT $CHOMP $VERSION
 );
 
-$VERSION = '1.02';
+$VERSION = '1.03';
 
 $VAR_START_TAG = '[%';
 $VAR_END_TAG   = '%]';
@@ -71,9 +71,8 @@ sub new {
 	$self->{'config'}->{'root'} = $ROOT
 	unless exists $self->{'config'}->{'root'};
 
-	# consider $HTML::KTemplate::CHOMP
 	$self->{'config'}->{'chomp'} = $CHOMP
-	unless exists $self->{'config'}->{'chomp'};
+	unless exists $self->{'config'}->{'chomp'};	 # will not be supported in the next versions
 	
 	bless ($self, $class);
 	return $self;
@@ -368,7 +367,8 @@ sub print {
 
 sub fetch {
 	my $self = shift;
-	return \$self->{'output'};
+	my $temp = $self->{'output'};	# just a temporary solution
+	return \$temp;
 }
 
 
@@ -593,7 +593,6 @@ Creates a new template object.
   
   $tpl = HTML::KTemplate->new( 
       root  => '/path/to/templates',
-      chomp => 0,
   );
 
 =head2 assign()
@@ -630,7 +629,7 @@ Returns a scalar reference to the output data.
 
   $output_ref = $tpl->fetch();
   
-  print FILE $$output_ref_ref;
+  print FILE $$output_ref;
 
 =head2 clear()
 
@@ -682,8 +681,6 @@ Deletes all whitespace characters preceding a block tag.
 
   $HTML::KTemplate::CHOMP = 1;  # default
   $HTML::KTemplate::CHOMP = 0;
-  
-  $tpl = HTML::KTemplate->new( chomp => 0 );
 
 
 =head1 COPYRIGHT
