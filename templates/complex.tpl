@@ -134,5 +134,8 @@ background-color:  #FFFFFF;
 
 </div>
 
+<!-- INCLUDE templates/loops.tpl -->
+
 </body>
 </html>
+

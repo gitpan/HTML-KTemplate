@@ -1,36 +1,56 @@
 #!/usr/bin/perl
 use strict;
 use Test;
-
-BEGIN { plan tests => 11 }
+BEGIN { plan tests => 20 }
 
 use HTML::KTemplate;
 my ($tpl, $output);
 
+
+# test process method
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign( VARIABLE => 'Variable');
+
+$tpl->process(
+	'templates/simple.tpl',
+	'templates/simple.tpl',
+	'templates/simple.tpl',
+);
+
+$tpl->process('templates/simple.tpl');
+
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	(?:
+		Text\s*
+		Variable\s*
+		Text\s*
+	){4}
+$/x);
 
 
 # test variables
 
 $tpl = HTML::KTemplate->new();
 
-$tpl->assign(  'VARIABLE_NAME' => 'Everything okay ...'  );
-$tpl->assign({ 'VARIABLE-NAME' => 'Everything okay ...' });
+$tpl->assign({ 'VARIABLE' => 'Testing...'  });
+
 $tpl->assign(
-
-    SUBROUTINE => sub {
-        return 'Everything okay ...';
-    },
-	
-	SOMETHING => { SOMEWHERE => 'Everything okay ...' },
-	ABC => { DEF => { GHI => { JKL => { MNO => 'Everything okay ...' }}}},
-
+	'_CHAR-TEST-' => 'Testing...', 
+	SUBROUTINE => sub { return 'Testing...' },
+	SOMETHING => { SOMEWHERE => 'Testing...' },
+	ABC => { DEF => { GHI => { JKL => { MNO => 'Testing...' }}}},
 );
 
 $tpl->process('templates/variables.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){5}\s*$/ );
-
+ok($$output =~ /^\s*
+	(?:Testing...\s*){5}
+$/x);
 
 
 # test loops
@@ -39,152 +59,107 @@ $tpl = HTML::KTemplate->new();
 
 $tpl->assign({
 
-	SOME_TEXT => 'Global variable ...',
+	VARIABLE => 'Global',
 	OUTER_LOOP => [
-		{ VAR => { INNER_LOOP => [0, 'a'] } },
-		{ SOME_TEXT => 'Loop variable (outer)...', 
-		  VAR => { INNER_LOOP => [[], {}] } },
-		{ SOME_TEXT => 'Loop variable (outer)...', 
-		  VAR => { INNER_LOOP => [{ SOME_TEXT => 'Loop variable (inner)...' }, {}] } },
+		{
+			OUTER_YES => 1,
+			OUTER_NO => 0,
+			VAR => { INNER_LOOP => [0, 'a'] }
+		},
+		{
+			VARIABLE => 'Outer', 
+			OUTER_YES => {},
+			OUTER_NO => undef,
+			VAR => { INNER_LOOP => [[], {}, undef] }
+		},
+		{
+			VARIABLE => 'Outer', 
+			OUTER_YES => 'blub',
+			VAR => {
+				INNER_LOOP => [ 
+					{ VARIABLE => 'Inner', INNER_YES => 1, INNER_NO => 0 },  
+					{},
+				]
+			}
+		},
 	],
 });
 
 $tpl->process('templates/loops.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*(?:Global variable ...\s*){4}(?:Loop variable \(outer\)...\s*){4}(?:Loop variable \(inner\)...\s*){1}(?:Loop variable \(outer\)...\s*){1}\s*$/ );
+ok($$output =~ /^\s*
+	Global\s*
+		Global\s*
+		OUTER_YES\s*
+			(?:Global\s*){2}
+		Outer\s*
+		OUTER_YES\s*
+			(?:Outer\s*){3}
+		Outer\s*
+		OUTER_YES\s*
+			Inner\s*
+			INNER_YES\s*
+			Outer\s*
+	Global\s*
+$/x);
 
 
-
-# test if-blocks
+# test if blocks
 
 $tpl = HTML::KTemplate->new();
 
-$tpl->assign( ON => 1, OFF => 0, CHECK => 'a', VARIABLE => 'Everything okay ...');
+$tpl->assign(
+	ON_1 => 1,
+	ON_2 => 1,
+	ON_3 => 'y',
+	ON_4 => {},
+	OFF_1 => 0,
+	OFF_2 => [],
+	OFF_3 => undef,
+	OFF_4 => '',
+);
 
 $tpl->process('templates/if.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){5}\s*$/ );
+ok($$output =~ /^\s*
+	Text\s*
+	(?:On\s*){4}
+	Text\s*
+$/x);
 
 
-
-# test block()
+# test block method
 
 $tpl = HTML::KTemplate->new();
 
 foreach (1..3) {
 	$tpl->block('OUTER_LOOP');
-	$tpl->assign( SOME_TEXT => 'Loop variable (outer)...' );
+	$tpl->assign( VARIABLE => 'Outer' );
 		
-	foreach (1..2) {
+	foreach (1..4) {
 		$tpl->block('OUTER_LOOP.VAR.INNER_LOOP');
-		$tpl->assign( SOME_TEXT => 'Loop variable (inner)...' );
+		$tpl->assign( VARIABLE => 'Inner' );
 	}
 }
 
 $tpl->block();
-$tpl->assign( SOME_TEXT => 'Global variable ...');
+$tpl->assign( VARIABLE => 'Global');
 
 $tpl->process('templates/loops.tpl');
 $output = $tpl->fetch();
 
-ok( $$output =~ /^\s*(?:Global variable ...\s*){1}(?:(?:Loop variable \(outer\)...\s*){1}(?:Loop variable \(inner\)...\s*){2}){3}\s*$/ );
-
-
-
-# test $HTML::KTemplate::ROOT = 'path/to/templates'
-
-$HTML::KTemplate::ROOT = 'templates';
-$tpl = HTML::KTemplate->new();
-
-$tpl->assign( VARIABLE => 'Everything okay ...' );
-
-$tpl->process('simple.tpl');
-$output = $tpl->fetch();
-
-$HTML::KTemplate::ROOT = undef;
-
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){1}\s*$/ );
-
-
-
-# test new( 'path/to/templates' )
-
-$HTML::KTemplate::ROOT = 'wrong/path';
-$tpl = HTML::KTemplate->new('templates');
-
-$tpl->assign( VARIABLE => 'Everything okay ...' );
-
-$tpl->process('simple.tpl');
-$output = $tpl->fetch();
-
-$HTML::KTemplate::ROOT = undef;
-
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){1}\s*$/ );
-
-
-
-# test new( root => 'path/to/templates' )
-
-$HTML::KTemplate::ROOT = 'wrong/path';
-$tpl = HTML::KTemplate->new(root => 'templates');
-
-$tpl->assign( VARIABLE => 'Everything okay ...' );
-
-$tpl->process('simple.tpl');
-$output = $tpl->fetch();
-
-$HTML::KTemplate::ROOT = undef;
-
-ok( $$output =~ /^\s*(?:Everything okay ...\s*){1}\s*$/ );
-
-
-
-# test clear_vars() clears variables
-
-$tpl = HTML::KTemplate->new();
-
-$tpl->assign( VARIABLE => 'Everything okay ...' );
-$tpl->clear_vars();
-
-$tpl->process('templates/simple.tpl');
-$output = $tpl->fetch();
-
-ok( $$output =~ /^\s*$/ );
-
-
-
-# test clear_vars() clears block reference
-
-$tpl = HTML::KTemplate->new();
-
-$tpl->block('BLOCK');
-$tpl->assign( VARIABLE => 'Everything okay ...' );
-$tpl->clear_vars();
-
-$tpl->assign( VARIABLE => 'Everything okay ...' );
-
-$tpl->process('templates/block.tpl');
-$output = $tpl->fetch();
-
-ok( $$output =~ /^\s*$/ );
-
-
-
-# test clear_out()
-
-$tpl = HTML::KTemplate->new();
-
-$tpl->assign( VARIABLE => 'Everything okay ...' );
-
-$tpl->process('templates/simple.tpl');
-$tpl->clear_out();
-
-$output = $tpl->fetch();
-
-ok( $$output =~ /^$/ );
-
+ok($$output =~ /^\s*
+	Global\s*
+	(?:
+		Outer\s*
+		(?:
+			Inner\s*
+		){4}
+	){3}
+	Global\s*
+$/x);
 
 
 # test a complex template
@@ -247,11 +222,6 @@ $tpl->assign(
 	LOGGED_OUT => 0,
 );
 
-$tpl->assign(
-	COLSPAN => 5,
-	USERNAME => 'Kasper',
-);
-
 foreach ('Category Row 1', 'Category Row 2', 'Category Row 3', 'Category Row 4') {
 	$tpl->block('CATROW');
 	$tpl->assign( NAME => $_ );
@@ -272,7 +242,278 @@ foreach ('Category Row 1', 'Category Row 2', 'Category Row 3', 'Category Row 4')
 	
 }
 
+$tpl->block('');
+
+$tpl->assign(
+	COLSPAN => 5,
+	USERNAME => 'Kasper',
+);
+
 $tpl->process( 'templates/complex.tpl' );
 $output = $tpl->fetch();
 
-ok( $$output =~ /^.+?KTemplate Test Forum.+?Register.+?(?:|.+?){5}Help.+?Logged in as Kasper.+?(?:Category Row.+?(?:off\.gif.+?Forum Row.+?Here comes some describtion.+?){4}){4}/s );
+ok($$output =~ /^.+?
+	KTemplate\sTest\sForum.+?
+	bgcolor=.FFFFFF.+?
+	Register.+?
+	(?:|.+?){5}
+	Help.+?
+	Logged.+?Kasper.+?
+	(?:
+		Category\sRow.+?
+		(?:
+			off\.gif.+?
+			Forum\sRow.+?
+			describtion.+?
+		){4}
+	){4}.+?
+	on\.gif.+?
+	off\.gif.+?
+$/sx && $$output =~ /(?:domain.+?){28}/s && $$output !~ /\[%/);
+
+
+# test root variable
+
+$HTML::KTemplate::ROOT = 'templates';
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign( VARIABLE => 'Variable' );
+
+$tpl->process('simple.tpl');
+$output = $tpl->fetch();
+
+$HTML::KTemplate::ROOT = undef;
+
+ok($$output =~ /^\s*
+	Text\s*
+	Variable\s*
+	Text\s*
+$/x);
+
+
+# test root option
+
+$HTML::KTemplate::ROOT = 'wrong/path';
+$tpl = HTML::KTemplate->new('templates');
+
+$tpl->assign( VARIABLE => 'Variable' );
+
+$tpl->process('simple.tpl');
+$output = $tpl->fetch();
+
+$HTML::KTemplate::ROOT = undef;
+
+ok($$output =~ /^\s*
+	Text\s*
+	Variable\s*
+	Text\s*
+$/x);
+
+
+# test root option
+
+$HTML::KTemplate::ROOT = 'wrong/path';
+$tpl = HTML::KTemplate->new(root => 'templates');
+
+$tpl->assign( VARIABLE => 'Variable' );
+
+$tpl->process('simple.tpl');
+$output = $tpl->fetch();
+
+$HTML::KTemplate::ROOT = undef;
+
+ok($$output =~ /^\s*
+	Text\s*
+	Variable\s*
+	Text\s*
+$/x);
+
+
+# test clear_vars method clears variables
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign( VARIABLE => 'Variable' );
+$tpl->clear_vars();
+
+$tpl->process('templates/simple.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	Text\s*
+	Text\s*
+$/x);
+
+
+# test clear_vars method clears block reference
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->block('BLOCK');
+$tpl->assign( VARIABLE => 'Testing...' );
+$tpl->clear_vars();
+
+$tpl->assign( VARIABLE => 'Testing...' );
+
+$tpl->process('templates/block.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*$/x);
+
+
+# test clear_out method
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign( VARIABLE => 'Variable' );
+
+$tpl->process('templates/simple.tpl');
+$tpl->clear_out();
+$output = $tpl->fetch();
+
+ok($$output =~ /^$/x);
+
+
+# test include
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign( VARIABLE => 'Variable' );
+
+$tpl->process('templates/include.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	(?:
+		Text\s*
+		Variable\s*
+		Text\s*
+	){6}
+$/x);
+
+
+# test recursive includes
+
+$tpl = HTML::KTemplate->new();
+
+eval { $tpl->process('templates/recursive.tpl') };
+ok($@ =~ /recursive includes/i);
+
+
+# test strict with vars
+
+$tpl = HTML::KTemplate->new('strict' => 1);
+
+eval { $tpl->process('templates/simple.tpl') };
+ok($@ =~ /no value found for variable/i);
+
+
+# test strict with disabled includes
+
+$tpl = HTML::KTemplate->new('strict' => 1, 'no_includes' => 1);
+
+eval { $tpl->process('templates/include.tpl') };
+ok($@ =~ /include blocks are disabled/i);
+
+
+# test changed tags
+
+$HTML::KTemplate::VAR_START_TAG = '${';
+$HTML::KTemplate::VAR_END_TAG   = '}';
+
+$HTML::KTemplate::BLOCK_START_TAG = '<<<';
+$HTML::KTemplate::BLOCK_END_TAG   = '>>>';
+
+$HTML::KTemplate::INCLUDE_START_TAG = '###';
+$HTML::KTemplate::INCLUDE_END_TAG   = '###';
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(VARIABLE => 'Variable');
+
+foreach (1 .. 4) {
+	$tpl->block('LOOP');
+	$tpl->assign(VARIABLE => $_);
+}
+
+$tpl->process('templates/tags.tpl');
+$output = $tpl->fetch();
+
+$HTML::KTemplate::VAR_START_TAG = '[%';
+$HTML::KTemplate::VAR_END_TAG   = '%]';
+
+$HTML::KTemplate::BLOCK_START_TAG = '<!--';
+$HTML::KTemplate::BLOCK_END_TAG   = '-->';
+
+$HTML::KTemplate::INCLUDE_START_TAG = '<!--';
+$HTML::KTemplate::INCLUDE_END_TAG   = '-->';
+
+ok($$output =~ /^\s*
+	Variable\s*
+	1\s*2\s*3\s*4\s*
+	Text\s*
+	\[%\sVARIABLE\s%\]\s*
+	Text\s*
+$/x);
+
+
+# test fetch method really works
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign( VARIABLE => 'Variable 1' );
+$tpl->process('templates/simple.tpl');
+$output = $tpl->fetch();
+
+$tpl->clear();
+
+$tpl->assign( VARIABLE => 'Variable 2' );
+$tpl->process('templates/simple.tpl');
+
+ok($$output =~ /^\s*
+	Text\s*
+	Variable\s1\s*
+	Text\s*
+$/x && ${$tpl->fetch()} =~ /^\s*
+	Text\s*
+	Variable\s2\s*
+	Text\s*
+$/x);
+
+
+# test loop context variables
+
+$tpl = HTML::KTemplate->new('loop_vars' => 1);
+
+foreach (1 .. 5) {
+	$tpl->block('LOOP');
+}
+
+$tpl->process('templates/context.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	First\s*
+	(?:Inner\s*){3}
+	Last\s*
+$/x);
+
+
+# test loop context variables with one loop
+
+$tpl = HTML::KTemplate->new('loop_vars' => 1);
+
+foreach (1 .. 1) {
+	$tpl->block('LOOP');
+}
+
+$tpl->process('templates/context.tpl');
+$output = $tpl->fetch();
+
+ok($$output =~ /^\s*
+	First\s*
+	Last\s*
+$/x);
+
+
+

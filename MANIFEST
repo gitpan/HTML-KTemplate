@@ -6,7 +6,11 @@ README
 test.pl
 templates/block.tpl
 templates/complex.tpl
+templates/context.tpl
 templates/if.tpl
+templates/include.tpl
 templates/loops.tpl
+templates/recursive.tpl
 templates/simple.tpl
+templates/tags.tpl
 templates/variables.tpl
