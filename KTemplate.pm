@@ -29,7 +29,7 @@ use vars qw(
 	$FIRST $INNER $LAST
 );
 
-$VERSION = '1.31';
+$VERSION = '1.32';
 
 $VAR_START_TAG = '[%';
 $VAR_END_TAG   = '%]';
@@ -252,22 +252,26 @@ sub _load {
 	# array or file handle, load and use it as template
 
 	if (ref $filename eq 'SCALAR') {
-	return $self->_parse($filename, '[scalar_ref]');
+	# skip undef and do not change passed scalar
+	$filedata = defined $$filename ? $$filename : '';
+	return $self->_parse(\$filedata, '[scalar_ref]');
 	}
-		
+
 	if (ref $filename eq 'ARRAY') {
 	$filedata = join("", @$filename);
 	return $self->_parse(\$filedata, '[array_ref]');
 	}
-	
+
 	if (ref $filename eq 'GLOB') {
 	$filedata = readline($$filename);
+	$filedata = '' unless defined $filedata; # skip undef
 	return $self->_parse(\$filedata, '[file_handle]');
 	}
 
 	# file handle (no reference)
 	if (ref \$filename eq 'GLOB') {
 	$filedata = readline($filename);
+	$filedata = '' unless defined $filedata; # skip undef
 	return $self->_parse(\$filedata, '[file_handle]');
 	}
 
@@ -1312,6 +1316,19 @@ Removes the newline before and after a block tag.
 
   $HTML::KTemplate::CHOMP = 1;  # default
   $HTML::KTemplate::CHOMP = 0;
+
+
+=head1 MAILING LIST
+
+If you want to get email when a new release of HTML::KTemplate is available, join the announcements mailing list:
+
+  http://lists.sourceforge.net/lists/listinfo/html-ktemplate-announce
+
+A mailing list for discussing HTML::KTemplate is available at <html-ktemplate-users@lists.sourceforge.net>. To join, visit:
+
+  http://lists.sourceforge.net/lists/listinfo/html-ktemplate-users
+
+You can also email me questions, comments, suggestions or bug reports directly to <kasper@repsak.de>.
 
 
 =head1 COPYRIGHT

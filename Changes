@@ -1,11 +1,18 @@
 
 +------------------------------------------------------------------+
-|  HTML::KTemplate v1.31 - Perl module to process HTML templates.  |
+|  HTML::KTemplate v1.32 - Perl module to process HTML templates.  |
 +------------------------------------------------------------------+
 
 
 CHANGES
 -------
+
+1.32  Wed Oct 15 23:29 2003
+    - New: mailing list available for announcements and discussion (see POD
+      documentation for more information).
+    - Fixed: process() method emptied scalar reference passed as template.
+    - Fixed: references to undefined values are skipped instead of raising an
+      error when passed to process() method.
 
 1.31  Fri Oct 10 10:58 2003
     - Fixed: print() method accepts file hande for compatibility reasons.

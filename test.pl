@@ -1,10 +1,10 @@
 #!/usr/bin/perl
 use strict;
 use Test;
-BEGIN { plan tests => 33 }
+BEGIN { plan tests => 34 }
 
 use HTML::KTemplate;
-my ($tpl, $output);
+my ($tpl, $output, $text, @text);
 
 
 # test process method
@@ -749,10 +749,12 @@ $tpl = HTML::KTemplate->new();
 
 $tpl->assign(VARIABLE => 'Test');
 
-my $tpl_scalar = 'Test [% VARIABLE %] Test';
+$text = 'Test [% VARIABLE %] Test';
 
-$tpl->process(\$tpl_scalar);
+$tpl->process(\$text);
 $output = $tpl->fetch();
+
+$text = undef;
 
 ok($$output =~ /^\s*(Test\s*){3}$/x);
 
@@ -763,10 +765,12 @@ $tpl = HTML::KTemplate->new();
 
 $tpl->assign(VARIABLE => 'Test');
 
-my @tpl_array = ('Test', '[% VARIABLE %]', 'Test');
+@text = ('Test', '[% VARIABLE %]', 'Test');
 
-$tpl->process(\@tpl_array);
+$tpl->process(\@text);
 $output = $tpl->fetch();
+
+@text = ();
 
 ok($$output =~ /^\s*(Test\s*){3}$/x);
 
@@ -802,3 +806,17 @@ close (FH);
 
 ok($$output =~ /^\s*Text\s*Test\s*Text\s*$/x);
 
+
+# test process method does not change scalar ref
+
+$tpl = HTML::KTemplate->new();
+
+$tpl->assign(VARIABLE => 'Test');
+
+$text = 'Test [% VARIABLE %] Test';
+
+$tpl->process(\$text);
+
+ok($text eq 'Test [% VARIABLE %] Test');
+
+$text = undef;

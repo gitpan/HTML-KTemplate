@@ -1,7 +1,15 @@
 
 +------------------------------------------------------------------+
-|  HTML::KTemplate v1.31 - Perl module to process HTML templates.  |
+|  HTML::KTemplate v1.32 - Perl module to process HTML templates.  |
 +------------------------------------------------------------------+
+
+
+DESCRIPTION
+-----------
+
+A simple and fast Perl module to process HTML templates with a customizable
+template syntax, support for multidimensional data structures and many
+advanced options.
 
 
 INSTALLATION
